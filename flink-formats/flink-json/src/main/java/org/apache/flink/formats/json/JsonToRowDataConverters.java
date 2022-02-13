@@ -48,12 +48,14 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.lang.reflect.Array;
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.time.temporal.TemporalAccessor;
 import java.time.temporal.TemporalQueries;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
@@ -287,7 +289,14 @@ public class JsonToRowDataConverters implements Serializable {
             if (jsonNode.isBigDecimal()) {
                 bigDecimal = jsonNode.decimalValue();
             } else {
-                bigDecimal = new BigDecimal(jsonNode.asText());
+                String text = jsonNode.asText();
+                try {
+                    bigDecimal = new BigDecimal(text);
+                } catch (NumberFormatException e) {
+                    // Debezium encodes decimal types as base64 encoded byte arrays.
+                    byte[] bytes = Base64.getDecoder().decode(text);
+                    bigDecimal = new BigDecimal(new BigInteger(bytes), scale);
+                }
             }
             return DecimalData.fromBigDecimal(bigDecimal, precision, scale);
         };
