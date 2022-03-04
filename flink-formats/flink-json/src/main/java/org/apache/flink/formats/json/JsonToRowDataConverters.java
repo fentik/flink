@@ -233,6 +233,14 @@ public class JsonToRowDataConverters implements Serializable {
                     // Debezium formats temporal types as numbers:
                     // https://debezium.io/documentation/reference/stable/connectors/postgresql.html#postgresql-temporal-values
                     long epochMicros = new BigInteger(text).longValue();
+                    if (epochMicros < 4102444800000L) {
+                        // TODO: HACK
+                        // Debezium uses both MicroTimestamp and Timestamp formats (micros and millis).
+                        // We need to get the actual type info passed through to here; until that's
+                        // done, we use a heuristic (dates under the year 2100 in millis are to close
+                        // to epoch to be in micros).
+                        epochMicros *= 1000;
+                    }
                     Instant instant = Instant.ofEpochMilli(epochMicros / 1000);
                     LocalDateTime dateTime = LocalDateTime.ofInstant(instant, ZoneOffset.UTC);
                     return TimestampData.fromLocalDateTime(dateTime);
