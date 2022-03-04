@@ -49,10 +49,12 @@ import java.io.Serializable;
 import java.lang.reflect.Array;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
+import java.time.format.DateTimeParseException;
 import java.time.temporal.TemporalAccessor;
 import java.time.temporal.TemporalQueries;
 import java.util.Base64;
@@ -224,7 +226,17 @@ public class JsonToRowDataConverters implements Serializable {
         TemporalAccessor parsedTimestamp;
         switch (timestampFormat) {
             case SQL:
-                parsedTimestamp = SQL_TIMESTAMP_FORMAT.parse(jsonNode.asText());
+                String text = jsonNode.asText();
+                try {
+                    parsedTimestamp = SQL_TIMESTAMP_FORMAT.parse(text);
+                } catch (DateTimeParseException e) {
+                    // Debezium formats temporal types as numbers:
+                    // https://debezium.io/documentation/reference/stable/connectors/postgresql.html#postgresql-temporal-values
+                    long epochMicros = new BigInteger(text).longValue();
+                    Instant instant = Instant.ofEpochMilli(epochMicros / 1000);
+                    LocalDateTime dateTime = LocalDateTime.ofInstant(instant, ZoneOffset.UTC);
+                    return TimestampData.fromLocalDateTime(dateTime);
+                }
                 break;
             case ISO_8601:
                 parsedTimestamp = ISO8601_TIMESTAMP_FORMAT.parse(jsonNode.asText());
