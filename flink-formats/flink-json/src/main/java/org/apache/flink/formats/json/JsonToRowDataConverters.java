@@ -210,8 +210,14 @@ public class JsonToRowDataConverters implements Serializable {
     }
 
     private int convertToDate(JsonNode jsonNode) {
-        LocalDate date = ISO_LOCAL_DATE.parse(jsonNode.asText()).query(TemporalQueries.localDate());
-        return (int) date.toEpochDay();
+        String text = jsonNode.asText();
+        try {
+            LocalDate date = ISO_LOCAL_DATE.parse(text).query(TemporalQueries.localDate());
+            return (int) date.toEpochDay();
+        } catch (DateTimeParseException e) {
+            // Debezium formats date type as int32 which is number of days since epoch. Fentik sets the type of these columns as DATE instead of int32, so, parse and return the value directly.
+            return Integer.parseInt(text);
+        }
     }
 
     private int convertToTime(JsonNode jsonNode) {
