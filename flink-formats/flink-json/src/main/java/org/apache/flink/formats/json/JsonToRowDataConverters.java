@@ -47,12 +47,16 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.lang.reflect.Array;
 import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
+import java.time.format.DateTimeParseException;
 import java.time.temporal.TemporalAccessor;
 import java.time.temporal.TemporalQueries;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
@@ -221,7 +225,25 @@ public class JsonToRowDataConverters implements Serializable {
         TemporalAccessor parsedTimestamp;
         switch (timestampFormat) {
             case SQL:
-                parsedTimestamp = SQL_TIMESTAMP_FORMAT.parse(jsonNode.asText());
+                String text = jsonNode.asText();
+                try {
+                    parsedTimestamp = SQL_TIMESTAMP_FORMAT.parse(text);
+                } catch (DateTimeParseException e) {
+                    // Debezium formats temporal types as numbers:
+                    // https://debezium.io/documentation/reference/stable/connectors/postgresql.html#postgresql-temporal-values
+                    long epochMicros = new BigInteger(text).longValue();
+                    if (epochMicros < 4102444800000L) {
+                        // TODO: HACK
+                        // Debezium uses both MicroTimestamp and Timestamp formats (micros and millis).
+                        // We need to get the actual type info passed through to here; until that's
+                        // done, we use a heuristic (dates under the year 2100 in millis are to close
+                        // to epoch to be in micros).
+                        epochMicros *= 1000;
+                    }
+                    Instant instant = Instant.ofEpochMilli(epochMicros / 1000);
+                    LocalDateTime dateTime = LocalDateTime.ofInstant(instant, ZoneOffset.UTC);
+                    return TimestampData.fromLocalDateTime(dateTime);
+                }
                 break;
             case ISO_8601:
                 parsedTimestamp = ISO8601_TIMESTAMP_FORMAT.parse(jsonNode.asText());
@@ -286,7 +308,14 @@ public class JsonToRowDataConverters implements Serializable {
             if (jsonNode.isBigDecimal()) {
                 bigDecimal = jsonNode.decimalValue();
             } else {
-                bigDecimal = new BigDecimal(jsonNode.asText());
+                String text = jsonNode.asText();
+                try {
+                    bigDecimal = new BigDecimal(text);
+                } catch (NumberFormatException e) {
+                    // Debezium encodes decimal types as base64 encoded byte arrays.
+                    byte[] bytes = Base64.getDecoder().decode(text);
+                    bigDecimal = new BigDecimal(new BigInteger(bytes), scale);
+                }
             }
             return DecimalData.fromBigDecimal(bigDecimal, precision, scale);
         };

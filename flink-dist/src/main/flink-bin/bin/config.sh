@@ -158,13 +158,13 @@ while [ -L "$target" ]; do
     iteration=$((iteration + 1))
 done
 
-# Convert relative path to absolute path and resolve directory symlinks
-bin=`dirname "$target"`
-SYMLINK_RESOLVED_BIN=`cd "$bin"; pwd -P`
-
 # Define the main directory of the flink installation
 # If config.sh is called by pyflink-shell.sh in python bin directory(pip installed), then do not need to set the FLINK_HOME here.
 if [ -z "$_FLINK_HOME_DETERMINED" ]; then
+    # Convert relative path to absolute path and resolve directory symlinks
+    bin=`dirname "$target"`
+    SYMLINK_RESOLVED_BIN=`cd "$bin"; pwd -P`
+
     FLINK_HOME=`dirname "$SYMLINK_RESOLVED_BIN"`
 fi
 if [ -z "$FLINK_LIB_DIR" ]; then FLINK_LIB_DIR=$FLINK_HOME/lib; fi
