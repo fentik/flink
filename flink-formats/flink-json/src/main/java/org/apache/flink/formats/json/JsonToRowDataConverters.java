@@ -214,7 +214,9 @@ public class JsonToRowDataConverters implements Serializable {
             LocalDate date = ISO_LOCAL_DATE.parse(text).query(TemporalQueries.localDate());
             return (int) date.toEpochDay();
         } catch (DateTimeParseException e) {
-            // Debezium formats date type as int32 which is number of days since epoch. Fentik sets the type of these columns as DATE instead of int32, so, parse and return the value directly.
+            // Debezium formats date type as int32 which is number of days since epoch. Fentik sets
+            // the type of these columns as DATE instead of int32, so, parse and return the value
+            // directly.
             return Integer.parseInt(text);
         }
     }
@@ -240,9 +242,11 @@ public class JsonToRowDataConverters implements Serializable {
                     long epochMicros = new BigInteger(text).longValue();
                     if (epochMicros < 4102444800000L) {
                         // TODO: HACK
-                        // Debezium uses both MicroTimestamp and Timestamp formats (micros and millis).
+                        // Debezium uses both MicroTimestamp and Timestamp formats (micros and
+                        // millis).
                         // We need to get the actual type info passed through to here; until that's
-                        // done, we use a heuristic (dates under the year 2100 in millis are to close
+                        // done, we use a heuristic (dates under the year 2100 in millis are to
+                        // close
                         // to epoch to be in micros).
                         epochMicros *= 1000;
                     }
