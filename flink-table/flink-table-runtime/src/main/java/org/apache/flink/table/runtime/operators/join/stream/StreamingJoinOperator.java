@@ -18,6 +18,10 @@
 
 package org.apache.flink.table.runtime.operators.join.stream;
 
+import org.apache.flink.metrics.Counter;
+import org.apache.flink.metrics.Meter;
+import org.apache.flink.metrics.MeterView;
+
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
@@ -51,6 +55,13 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
     // right join state
     private transient JoinRecordStateView rightRecordStateView;
 
+    // Stats related to associatedRecords for each processed row. Helps us understand the overhead of
+    // reading from state.
+    private transient Counter associatedRecordsSizeSum;
+    private transient Counter associatedRecordsCallCount;
+    private transient Meter associatedRecordsSizeSumRate;
+    private transient Meter associatedRecordsCallRate;
+
     public StreamingJoinOperator(
             InternalTypeInfo<RowData> leftType,
             InternalTypeInfo<RowData> rightType,
@@ -80,6 +91,13 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         this.outRow = new JoinedRowData();
         this.leftNullRow = new GenericRowData(leftType.toRowSize());
         this.rightNullRow = new GenericRowData(rightType.toRowSize());
+
+        this.associatedRecordsCallCount = getRuntimeContext().getMetricGroup().counter("associated_records_call_count");
+        this.associatedRecordsCallRate = getRuntimeContext().getMetricGroup().meter("associated_records_call_rate",
+                                                                new MeterView(this.associatedRecordsCallCount));
+        this.associatedRecordsSizeSum = getRuntimeContext().getMetricGroup().counter("associated_records_size_sum");
+        this.associatedRecordsSizeSumRate = getRuntimeContext().getMetricGroup().meter("associated_records_size_sum_rate",
+                                                                new MeterView(this.associatedRecordsSizeSum));
 
         // initialize states
         if (leftIsOuter) {
@@ -209,6 +227,8 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
 
         AssociatedRecords associatedRecords =
                 AssociatedRecords.of(input, inputIsLeft, otherSideStateView, joinCondition);
+        this.associatedRecordsSizeSum.inc(associatedRecords.size());
+        this.associatedRecordsCallCount.inc();
         if (isAccumulateMsg) { // record is accumulate
             if (inputIsOuter) { // input side is outer
                 OuterJoinRecordStateView inputSideOuterStateView =
