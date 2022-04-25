@@ -11,6 +11,7 @@ cp ./flink-connectors/flink-sql-connector-kafka/target/flink-sql-connector-kafka
 cp ./flink-connectors/flink-connector-hive/target/flink-connector-hive_2.12-1.15.0.jar $LIB_DIR
 cp ./flink-connectors/flink-connector-hive/target/flink-connector-hive_2.12-1.15.0.jar $LIB_DIR
 cp ./flink-table/flink-table-runtime/target/flink-table-runtime-1.15.0.jar  $LIB_DIR
+cp ./flink-metrics/flink-metrics-prometheus/target/flink-metrics-prometheus-1.15.0.jar $LIB_DIR
 
 aws s3 cp s3://dev-dataflo/ops/ec2/flink-lib/libfb303-0.9.3.jar $LIB_DIR
 aws s3 cp s3://dev-dataflo/ops/ec2/flink-lib/hive-exec-3.1.2.jar $LIB_DIR
