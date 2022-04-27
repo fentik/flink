@@ -37,6 +37,20 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
+
+import org.apache.flink.types.RowKind;
+import org.apache.flink.types.Row;
+
+import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.types.utils.TypeConversions;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.Arrays;
+
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /**
@@ -46,6 +60,7 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperator<RowData>
         implements TwoInputStreamOperator<RowData, RowData, RowData> {
 
+    private static final Logger LOG = LoggerFactory.getLogger(AbstractStreamingJoinOperator.class);
     private static final long serialVersionUID = -376944622236540545L;
 
     protected static final String LEFT_RECORDS_STATE_NAME = "left-records";
@@ -102,6 +117,59 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
         }
     }
 
+    protected static String rowToString(InternalTypeInfo<RowData> internalTypes, RowData row) {
+        RowType type = internalTypes.toRowType();
+        LogicalType[] fieldTypes =
+                type.getFields().stream()
+                        .map(RowType.RowField::getType)
+                        .toArray(LogicalType[]::new);
+        String[] fieldNames = type.getFieldNames().toArray(new String[0]);
+        int rowArity = type.getFieldCount();
+        String rowString = "";
+        for (int i = 0; i < rowArity; i++) {
+            String value = "";
+	    if (row.isNullAt(i)) {
+		value = "<NULL>";
+	    } else {
+		switch (fieldTypes[i].getTypeRoot()) {
+                case NULL:
+                    value = "<NULL>";
+                    break;
+		    
+                case BOOLEAN:
+                    value = row.getBoolean(i) ? "True" : "False";
+                    break;
+
+                case INTEGER:
+                case INTERVAL_YEAR_MONTH:
+                    value = Integer.toString(row.getInt(i));
+                    break;
+		    
+                case BIGINT:
+                case INTERVAL_DAY_TIME:
+                    value = Long.toString(row.getLong(i));
+                    break;
+
+                case CHAR:
+                case VARCHAR:
+                    value = row.getString(i).toString();
+                    break;
+
+                case DATE:
+                    value = "[DATE TYPE]";
+                    break;
+
+                default:
+                    value = "[Unprocessed type]";
+                    break;
+		}
+	    }
+            String field = fieldNames[i] + "=" + value;
+            rowString = rowString + field + (i == rowArity - 1 ? "" : ", ");
+        }
+        return rowString;
+    }
+
     /**
      * The {@link AssociatedRecords} is the records associated to the input row. It is a wrapper of
      * {@code List<OuterRecord>} which provides two helpful methods {@link #getRecords()} and {@link
@@ -143,13 +211,29 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
          * Creates an {@link AssociatedRecords} which represents the records associated to the input
          * row.
          */
-        public static AssociatedRecords of(
+
+	public static AssociatedRecords of(
                 RowData input,
                 boolean inputIsLeft,
                 JoinRecordStateView otherSideStateView,
                 JoinCondition condition)
                 throws Exception {
+	    String operator_name = " ";
+	    return AssociatedRecords.of(input, inputIsLeft, null, null, operator_name, otherSideStateView, condition);
+	}
+
+        public static AssociatedRecords of(
+                RowData input,
+                boolean inputIsLeft,
+		InternalTypeInfo<RowData> leftType,
+		InternalTypeInfo<RowData> rightType,
+		String operator_name,
+                JoinRecordStateView otherSideStateView,
+                JoinCondition condition)
+                throws Exception {
             List<OuterRecord> associations = new ArrayList<>();
+	    int rows_fetched = 0;
+	    int rows_matched = 0;
             if (otherSideStateView instanceof OuterJoinRecordStateView) {
                 OuterJoinRecordStateView outerStateView =
                         (OuterJoinRecordStateView) otherSideStateView;
@@ -160,10 +244,16 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
                             inputIsLeft
                                     ? condition.apply(input, record.f0)
                                     : condition.apply(record.f0, input);
+		    rows_fetched = rows_fetched + 1;
                     if (matched) {
+			rows_matched = rows_matched + 1;
                         associations.add(new OuterRecord(record.f0, record.f1));
                     }
                 }
+		if ((rows_fetched > 1000 || rows_fetched - rows_matched > 500) && leftType != null && rightType != null) {
+		    LOG.info(operator_name + ": EXPENSIVE Outer Join fetched: " + rows_fetched + ", matched " + rows_matched);
+		    LOG.info(operator_name + ": EXPENSIVE joining " + (inputIsLeft ? " left input: " : "right input: ") + rowToString(inputIsLeft ? leftType : rightType, input));
+		}
             } else {
                 Iterable<RowData> records = otherSideStateView.getRecords();
                 for (RowData record : records) {
@@ -171,10 +261,17 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
                             inputIsLeft
                                     ? condition.apply(input, record)
                                     : condition.apply(record, input);
+		    rows_fetched = rows_fetched + 1;
+
                     if (matched) {
+			rows_matched = rows_matched + 1;
                         // use -1 as the default number of associations
                         associations.add(new OuterRecord(record, -1));
                     }
+                }
+		if ((rows_fetched > 1000 || rows_fetched - rows_matched > 500)  && leftType != null && rightType != null) {
+		    LOG.info(operator_name + ": EXPENSIVE Inner Join fetched: " + rows_fetched + ", matched " + rows_matched);
+		    LOG.info(operator_name + ": EXPENSIVE Joining " + (inputIsLeft ? " left input: " : "right input: ") + rowToString(inputIsLeft ? leftType : rightType, input));
                 }
             }
             return new AssociatedRecords(associations);

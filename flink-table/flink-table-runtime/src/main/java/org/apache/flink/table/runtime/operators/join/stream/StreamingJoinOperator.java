@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.runtime.operators.join.stream;
 
+
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.Meter;
 import org.apache.flink.metrics.MeterView;
@@ -36,8 +37,10 @@ import org.apache.flink.table.runtime.operators.join.stream.state.OuterJoinRecor
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.types.RowKind;
 
+
 /** Streaming unbounded Join operator which supports INNER/LEFT/RIGHT/FULL JOIN. */
 public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
+
 
     private static final long serialVersionUID = -376944622236540545L;
 
@@ -54,6 +57,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
     private transient JoinRecordStateView leftRecordStateView;
     // right join state
     private transient JoinRecordStateView rightRecordStateView;
+
 
     // Stats related to associatedRecords for each processed row. Helps us understand the overhead of
     // reading from state.
@@ -147,6 +151,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         processElement(element.getValue(), rightRecordStateView, leftRecordStateView, false);
     }
 
+
     /**
      * Process an input element and output incremental joined records, retraction messages will be
      * sent in some scenarios.
@@ -225,8 +230,9 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         RowKind inputRowKind = input.getRowKind();
         input.setRowKind(RowKind.INSERT); // erase RowKind for later state updating
 
+	// Pass in leftType, rightType, OperatorName, which are used to log expensive joins.
         AssociatedRecords associatedRecords =
-                AssociatedRecords.of(input, inputIsLeft, otherSideStateView, joinCondition);
+	    AssociatedRecords.of(input, inputIsLeft, this.leftType, this.rightType, getOperatorName(), otherSideStateView, joinCondition);
         this.associatedRecordsSizeSum.inc(associatedRecords.size());
         this.associatedRecordsCallCount.inc();
         if (isAccumulateMsg) { // record is accumulate
