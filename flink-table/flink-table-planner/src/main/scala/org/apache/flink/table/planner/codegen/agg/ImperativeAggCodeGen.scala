@@ -17,6 +17,7 @@
  */
 package org.apache.flink.table.planner.codegen.agg
 
+import org.apache.flink.runtime.util.SingleElementIterator
 import org.apache.flink.table.data.{GenericRowData, RowData, UpdatableRowData}
 import org.apache.flink.table.expressions.Expression
 import org.apache.flink.table.functions.{ImperativeAggregateFunction, UserDefinedFunctionHelper}
@@ -28,7 +29,6 @@ import org.apache.flink.table.planner.expressions.DeclarativeExpressionResolver
 import org.apache.flink.table.planner.expressions.DeclarativeExpressionResolver.toRexInputRef
 import org.apache.flink.table.planner.expressions.converter.ExpressionConverter
 import org.apache.flink.table.planner.plan.utils.AggregateInfo
-import org.apache.flink.table.planner.utils.SingleElementIterator
 import org.apache.flink.table.runtime.dataview.DataViewSpec
 import org.apache.flink.table.runtime.types.LogicalTypeDataTypeConverter.fromDataTypeToLogicalType
 import org.apache.flink.table.types.DataType
