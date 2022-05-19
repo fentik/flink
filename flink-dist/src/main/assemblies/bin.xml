@@ -107,6 +107,14 @@ under the License.
 			<fileMode>0644</fileMode>
 		</file>
 
+		<!-- Fentik custom UDF package -->
+		<file>
+                        <source>../fentik-udf/target/fentik-sql-functions-0.1.0.jar</source>
+                        <outputDirectory>lib/</outputDirectory>
+                        <destName>fentik-sql-functions-0.1.0.jar</destName>
+                        <fileMode>0644</fileMode>
+		</file>
+
 		<!-- Built-in connectors and formats -->
 		<file>
 			<source>../flink-connectors/flink-connector-files/target/flink-connector-files-${project.version}.jar</source>
