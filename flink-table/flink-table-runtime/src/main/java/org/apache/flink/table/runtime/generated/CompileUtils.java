@@ -97,7 +97,7 @@ public final class CompileUtils {
 
     private static <T> Class<T> doCompile(ClassLoader cl, String name, String code) {
         checkNotNull(cl, "Classloader must not be null.");
-        CODE_LOG.info("Compiling: {} \n\n Code:\n{}", name, code);
+        CODE_LOG.debug("Compiling: {} \n\n Code:\n{}", name, code);
         SimpleCompiler compiler = new SimpleCompiler();
         compiler.setParentClassLoader(cl);
         try {
