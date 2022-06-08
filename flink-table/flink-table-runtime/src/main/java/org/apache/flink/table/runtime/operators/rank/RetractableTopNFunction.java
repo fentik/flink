@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.runtime.operators.rank;
 
+import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.state.MapState;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.MapStateDescriptor;
@@ -25,6 +26,7 @@ import org.apache.flink.api.common.state.StateTtlConfig;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
+import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.typeutils.ListTypeInfo;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.data.RowData;
@@ -100,6 +102,7 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
     private boolean isStreamMode = true;
     private long count = 0;
     private boolean isBatchBackfillEnabled = false;
+    private final TypeSerializer<RowData> inputRowSer;
 
     public RetractableTopNFunction(
             StateTtlConfig ttlConfig,
@@ -127,6 +130,7 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
         this.serializableComparator = comparableRecordComparator;
         this.generatedEqualiser = generatedEqualiser;
         this.isBatchBackfillEnabled = isBatchBackfillEnabled;
+        this.inputRowSer = inputRowType.createSerializer(new ExecutionConfig());
     }
 
     @Override
@@ -453,7 +457,7 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
             }
         }
         if (toDelete != null) {
-            collectDelete(out, toDelete);
+            collectDelete(out, inputRowSer.copy(toDelete));
         }
         if (toCollect != null) {
             collectInsert(out, inputRow);
