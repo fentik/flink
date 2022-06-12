@@ -29,7 +29,6 @@ import org.rocksdb.BlockBasedTableConfig;
 import org.rocksdb.BloomFilter;
 import org.rocksdb.Cache;
 import org.rocksdb.ColumnFamilyOptions;
-import org.rocksdb.CompressionType;
 import org.rocksdb.DBOptions;
 import org.rocksdb.Filter;
 import org.rocksdb.IndexType;
@@ -184,8 +183,6 @@ public final class RocksDBResourceContainer implements AutoCloseable {
             blockBasedTableConfig.setCacheIndexAndFilterBlocks(true);
             blockBasedTableConfig.setCacheIndexAndFilterBlocksWithHighPriority(true);
             blockBasedTableConfig.setPinL0FilterAndIndexBlocksInCache(true);
-	    // Fentik: disable Snappy compression to debug performance issues.
-            blockBasedTableConfig.setEnableIndexCompression(false);
             opt.setTableFormatConfig(blockBasedTableConfig);
         }
 
@@ -269,7 +266,7 @@ public final class RocksDBResourceContainer implements AutoCloseable {
 
     /** Create a {@link ColumnFamilyOptions} for RocksDB, including some common settings. */
     ColumnFamilyOptions createBaseCommonColumnOptions() {
-        return new ColumnFamilyOptions().setCompressionType(CompressionType.NO_COMPRESSION);
+        return new ColumnFamilyOptions();
     }
 
     /**
