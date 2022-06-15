@@ -43,7 +43,7 @@ public abstract class AbstractS3FileSystemFactory implements FileSystemFactory {
     public static final ConfigOption<Long> PART_UPLOAD_MIN_SIZE =
             ConfigOptions.key("s3.upload.min.part.size")
                     .longType()
-                    .defaultValue(FlinkS3FileSystem.S3_MULTIPART_MIN_PART_SIZE * 16)
+                    .defaultValue(FlinkS3FileSystem.S3_MULTIPART_MIN_PART_SIZE)
                     .withDescription(
                             "This option is relevant to the Recoverable Writer and sets the min size of data that "
                                     + "buffered locally, before being sent to S3. Flink also takes care of checkpointing locally "
@@ -52,7 +52,7 @@ public abstract class AbstractS3FileSystemFactory implements FileSystemFactory {
     public static final ConfigOption<Integer> MAX_CONCURRENT_UPLOADS =
             ConfigOptions.key("s3.upload.max.concurrent.uploads")
                     .intType()
-                    .defaultValue(512)
+                    .defaultValue(Runtime.getRuntime().availableProcessors())
                     .withDescription(
                             "This option is relevant to the Recoverable Writer and limits the number of "
                                     + "parts that can be concurrently in-flight. By default, this is set to "
