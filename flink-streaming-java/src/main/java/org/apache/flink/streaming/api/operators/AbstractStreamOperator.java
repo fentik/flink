@@ -48,6 +48,7 @@ import org.apache.flink.runtime.state.VoidNamespace;
 import org.apache.flink.runtime.state.VoidNamespaceSerializer;
 import org.apache.flink.streaming.api.graph.StreamConfig;
 import org.apache.flink.streaming.api.operators.StreamOperatorStateHandler.CheckpointedStreamOperator;
+// import org.apache.flink.streaming.api.operators.util.DebugLogWatcher;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.LatencyMarker;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
@@ -143,6 +144,8 @@ public abstract class AbstractStreamOperator<OUT>
 
     protected transient LatencyStats latencyStats;
 
+    //    protected DebugLogWatcher debugLogWatcher;
+
     // ---------------- time handler ------------------
 
     protected transient ProcessingTimeService processingTimeService;
@@ -237,6 +240,9 @@ public abstract class AbstractStreamOperator<OUT>
 
         stateKeySelector1 = config.getStatePartitioner(0, getUserCodeClassloader());
         stateKeySelector2 = config.getStatePartitioner(1, getUserCodeClassloader());
+
+        String fileName = getOperatorName();
+	//        this.debugLogWatcher = new DebugLogWatcher("conf/" + fileName, 10);
     }
 
     /**
