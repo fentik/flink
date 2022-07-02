@@ -37,7 +37,6 @@ import org.apache.flink.table.runtime.operators.join.stream.state.OuterJoinRecor
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.types.RowKind;
 
-
 /** Streaming unbounded Join operator which supports INNER/LEFT/RIGHT/FULL JOIN. */
 public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
 
@@ -230,11 +229,14 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         RowKind inputRowKind = input.getRowKind();
         input.setRowKind(RowKind.INSERT); // erase RowKind for later state updating
 
-	// Pass in leftType, rightType, OperatorName, which are used to log expensive joins.
+    	// Pass in leftType, rightType, OperatorName, which are used to log expensive joins.
         AssociatedRecords associatedRecords =
 	    AssociatedRecords.of(input, inputIsLeft, this.leftType, this.rightType, getOperatorName(), otherSideStateView, joinCondition);
         this.associatedRecordsSizeSum.inc(associatedRecords.size());
         this.associatedRecordsCallCount.inc();
+        if (this.shouldLogInput()) {
+            LOG.info("Processing input row: " + rowToString(inputIsLeft ? leftType : rightType, input));
+        }
         if (isAccumulateMsg) { // record is accumulate
             if (inputIsOuter) { // input side is outer
                 OuterJoinRecordStateView inputSideOuterStateView =

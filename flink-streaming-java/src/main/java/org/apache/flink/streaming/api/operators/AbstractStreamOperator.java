@@ -28,6 +28,7 @@ import org.apache.flink.api.common.state.State;
 import org.apache.flink.api.common.state.StateDescriptor;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.functions.KeySelector;
+import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.MetricOptions;
 import org.apache.flink.core.fs.CloseableRegistry;
@@ -48,7 +49,7 @@ import org.apache.flink.runtime.state.VoidNamespace;
 import org.apache.flink.runtime.state.VoidNamespaceSerializer;
 import org.apache.flink.streaming.api.graph.StreamConfig;
 import org.apache.flink.streaming.api.operators.StreamOperatorStateHandler.CheckpointedStreamOperator;
-// import org.apache.flink.streaming.api.operators.util.DebugLogWatcher;
+import org.apache.flink.streaming.api.operators.util.DebugLogWatcher;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.LatencyMarker;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
@@ -61,6 +62,7 @@ import org.apache.flink.util.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Paths;
 import java.io.Serializable;
 import java.util.Locale;
 import java.util.Optional;
@@ -144,7 +146,7 @@ public abstract class AbstractStreamOperator<OUT>
 
     protected transient LatencyStats latencyStats;
 
-    //    protected DebugLogWatcher debugLogWatcher;
+    protected DebugLogWatcher debugLogWatcher;
 
     // ---------------- time handler ------------------
 
@@ -241,8 +243,9 @@ public abstract class AbstractStreamOperator<OUT>
         stateKeySelector1 = config.getStatePartitioner(0, getUserCodeClassloader());
         stateKeySelector2 = config.getStatePartitioner(1, getUserCodeClassloader());
 
-        String fileName = getOperatorName();
-	//        this.debugLogWatcher = new DebugLogWatcher("conf/" + fileName, 10);
+        String fileName = getOperatorID().toString() + ".debug";
+        String configDir = System.getenv(ConfigConstants.ENV_FLINK_CONF_DIR);
+	    this.debugLogWatcher = new DebugLogWatcher(Paths.get(configDir, fileName).toString(), getOperatorName(), 10);
     }
 
     /**
@@ -336,6 +339,7 @@ public abstract class AbstractStreamOperator<OUT>
         if (stateHandler != null) {
             stateHandler.dispose();
         }
+        this.debugLogWatcher.close();
     }
 
     @Override
@@ -415,6 +419,9 @@ public abstract class AbstractStreamOperator<OUT>
         return container.getUserCodeClassLoader();
     }
 
+    public boolean shouldLogInput() {
+        return debugLogWatcher.shouldLog();
+    }
     /**
      * Return the operator name. If the runtime context has been set, then the task name with
      * subtask index is returned. Otherwise, the simple class name is returned.
