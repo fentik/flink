@@ -37,7 +37,6 @@ public class DebugLogWatcher{
         }
 
         public void run() {
-            LOG.info("Looking for presence of " + this.fileName + " for " + this.operatorName);
             File f = new File(this.fileName);
             int newLogFrequency = -1;
             if (f.exists()) {
