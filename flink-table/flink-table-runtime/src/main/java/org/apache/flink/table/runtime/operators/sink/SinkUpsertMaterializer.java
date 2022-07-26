@@ -106,7 +106,7 @@ public class SinkUpsertMaterializer extends TableStreamOperator<RowData>
             values = new ArrayList<>(2);
         }
         if (this.shouldLogInput()) {
-            LOG.info("Processing input (" + row.getRowKind() + "): " + element.toString());
+            LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with " + values.size() + "values : " + element.toString());
         }
         switch (row.getRowKind()) {
             case INSERT:
