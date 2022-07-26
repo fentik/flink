@@ -401,7 +401,8 @@ public abstract class CommonExecSink extends ExecNodeBase<Object>
                         StateConfigUtil.createTtlConfig(
                                 config.get(ExecutionConfigOptions.IDLE_STATE_RETENTION).toMillis()),
                         InternalSerializers.create(physicalRowType),
-                        equaliser);
+                        equaliser,
+                        physicalRowType);
         final String[] fieldNames = physicalRowType.getFieldNames().toArray(new String[0]);
         final List<String> pkFieldNames =
                 Arrays.stream(primaryKeys)
