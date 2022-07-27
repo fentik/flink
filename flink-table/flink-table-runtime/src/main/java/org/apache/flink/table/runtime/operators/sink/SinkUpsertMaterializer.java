@@ -106,6 +106,13 @@ public class SinkUpsertMaterializer extends TableStreamOperator<RowData>
         this.serializer = serializer;
         this.generatedEqualiser = generatedEqualiser;
         this.physicalRowType = physicalRowType;
+        if (this.physicalRowType == null) {
+            LOG.info("WARNING: SinkUpsertMaterializer is being called without the physicalRowType - This reduces what we can log for debugging. See the stacktrace to see if you can fix the caller.");
+            String stacktrace = ExceptionUtils.stringifyException((new Exception("Missing RowType information")));
+            LOG.info(stacktrace);
+        } else {
+            LOG.info("Initializing SinkUpsertMaterializer with schema for the input row: " + this.physicalRowType.asSummaryString());
+        }
     }
 
     @Override
@@ -184,11 +191,13 @@ public class SinkUpsertMaterializer extends TableStreamOperator<RowData>
             values = new ArrayList<>(2);
         }
         if (this.shouldLogInput()) {
+            String key = row.getString(0).toString();  // Assumes the first column in a string.
             if (this.physicalRowType != null) {
-                LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with " + values.size() + " values : " +
+                LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with key " + key + " " + values.size() + " values : " +
                 this.rowToString(this.physicalRowType, row));
             } else {
-                LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with " + values.size() + " values : " + element.toString());
+                String data = parseRow(row);
+                LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with key " + key + " " + values.size() + " values : " + element.toString());
             }
         }
         switch (row.getRowKind()) {
