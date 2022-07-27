@@ -31,6 +31,8 @@ import org.apache.flink.table.runtime.generated.GeneratedRecordEqualiser;
 import org.apache.flink.table.runtime.generated.RecordEqualiser;
 import org.apache.flink.table.runtime.operators.TableStreamOperator;
 import org.apache.flink.types.RowKind;
+import org.apache.flink.util.ExceptionUtils;
+
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -90,6 +92,9 @@ public class SinkUpsertMaterializer extends TableStreamOperator<RowData>
         this.serializer = serializer;
         this.generatedEqualiser = generatedEqualiser;
         this.physicalRowType = null;
+        LOG.info("WARNING: SinkUpsertMaterializer is being called without the physicalRowType - This reduces what we can log for debugging. See the stacktrace to see if you can fix the caller.");
+        String stacktrace = ExceptionUtils.stringifyException((new Exception("Missing RowType information")));
+        LOG.info(stacktrace);
     }
 
     public SinkUpsertMaterializer(
@@ -180,10 +185,10 @@ public class SinkUpsertMaterializer extends TableStreamOperator<RowData>
         }
         if (this.shouldLogInput()) {
             if (this.physicalRowType != null) {
-                LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with " + values.size() + "values : " +
+                LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with " + values.size() + " values : " +
                 this.rowToString(this.physicalRowType, row));
             } else {
-                LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with " + values.size() + "values : " + element.toString());
+                LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with " + values.size() + " values : " + element.toString());
             }
         }
         switch (row.getRowKind()) {
