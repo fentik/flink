@@ -199,7 +199,7 @@ public class SinkUpsertMaterializer extends TableStreamOperator<RowData>
         }
         if (values.size() > 10 || size > 1024*1024) {
             key = row.getString(0).toString();  // Assumes the first column in a string.
-            LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: EXPENSIVE update to state value with key " + key + "to values {num entries: " + values.size() + "} with a row of size " + size);
+            LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: EXPENSIVE update to state value with key " + key + " to values {num entries: " + values.size() + "} with a row of size " + size);
         }
         if (this.shouldLogInput()) {
             key = row.getString(0).toString();  // Assumes the first column in a string.
