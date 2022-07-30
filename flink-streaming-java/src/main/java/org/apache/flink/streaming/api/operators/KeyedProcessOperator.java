@@ -18,6 +18,7 @@
 package org.apache.flink.streaming.api.operators;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.runtime.state.KeyedStateBackend;
 import org.apache.flink.runtime.state.VoidNamespace;
 import org.apache.flink.runtime.state.VoidNamespaceSerializer;
 import org.apache.flink.streaming.api.SimpleTimerService;
@@ -30,7 +31,10 @@ import org.apache.flink.util.OutputTag;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 import static org.apache.flink.util.Preconditions.checkState;
 
-/** A {@link StreamOperator} for executing {@link KeyedProcessFunction KeyedProcessFunctions}. */
+/**
+ * A {@link StreamOperator} for executing {@link KeyedProcessFunction
+ * KeyedProcessFunctions}.
+ */
 @Internal
 public class KeyedProcessOperator<K, IN, OUT>
         extends AbstractUdfStreamOperator<OUT, KeyedProcessFunction<K, IN, OUT>>
@@ -55,8 +59,8 @@ public class KeyedProcessOperator<K, IN, OUT>
         super.open();
         collector = new TimestampedCollector<>(output);
 
-        InternalTimerService<VoidNamespace> internalTimerService =
-                getInternalTimerService("user-timers", VoidNamespaceSerializer.INSTANCE, this);
+        InternalTimerService<VoidNamespace> internalTimerService = getInternalTimerService("user-timers",
+                VoidNamespaceSerializer.INSTANCE, this);
 
         TimerService timerService = new SimpleTimerService(internalTimerService);
 
@@ -81,6 +85,8 @@ public class KeyedProcessOperator<K, IN, OUT>
         collector.setTimestamp(element);
         context.element = element;
         userFunction.processElement(element.getValue(), context, collector);
+        KeyedStateBackend<K> be = getKeyedStateBackend();
+        userFunction.emitStateAndSwitchToStreaming(context, collector, be);
         context.element = null;
     }
 

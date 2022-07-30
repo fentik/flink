@@ -21,8 +21,10 @@ package org.apache.flink.table.runtime.operators.aggregate;
 import org.apache.flink.api.common.state.StateTtlConfig;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
+import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
+import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.utils.JoinedRowData;
 import org.apache.flink.table.runtime.dataview.PerKeyStateDataViewStore;
@@ -34,15 +36,27 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Collector;
+import org.apache.flink.api.common.state.MapState;
+import org.apache.flink.api.common.state.State;
 
 import static org.apache.flink.table.data.util.RowDataUtil.isAccumulateMsg;
 import static org.apache.flink.table.data.util.RowDataUtil.isRetractMsg;
 import static org.apache.flink.table.runtime.util.StateConfigUtil.createTtlConfig;
 
+import org.apache.flink.runtime.state.KeyedStateBackend;
+import org.apache.flink.runtime.state.KeyedStateFunction;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.Iterator;
+
 /** Aggregate Function used for the groupby (without window) aggregate. */
 public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, RowData> {
 
+    private int count = 0;
     private static final long serialVersionUID = -4767158666069797704L;
+
+    private static final Logger LOG = LoggerFactory.getLogger(GroupAggFunction.class);
 
     /** The code generated function used to handle aggregates. */
     private final GeneratedAggsHandleFunction genAggsHandler;
@@ -62,6 +76,8 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
     /** State idle retention time which unit is MILLISECONDS. */
     private final long stateRetentionTime;
 
+    private PerKeyStateDataViewStore dataViewStore = null;
+
     /** Reused output row. */
     private transient JoinedRowData resultRow = null;
 
@@ -77,14 +93,20 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
     /**
      * Creates a {@link GroupAggFunction}.
      *
-     * @param genAggsHandler The code generated function used to handle aggregates.
-     * @param genRecordEqualiser The code generated equaliser used to equal RowData.
-     * @param accTypes The accumulator types.
-     * @param indexOfCountStar The index of COUNT(*) in the aggregates. -1 when the input doesn't
-     *     contain COUNT(*), i.e. doesn't contain retraction messages. We make sure there is a
-     *     COUNT(*) if input stream contains retraction.
-     * @param generateUpdateBefore Whether this operator will generate UPDATE_BEFORE messages.
-     * @param stateRetentionTime state idle retention time which unit is MILLISECONDS.
+     * @param genAggsHandler       The code generated function used to handle
+     *                             aggregates.
+     * @param genRecordEqualiser   The code generated equaliser used to equal
+     *                             RowData.
+     * @param accTypes             The accumulator types.
+     * @param indexOfCountStar     The index of COUNT(*) in the aggregates. -1 when
+     *                             the input doesn't
+     *                             contain COUNT(*), i.e. doesn't contain retraction
+     *                             messages. We make sure there is a
+     *                             COUNT(*) if input stream contains retraction.
+     * @param generateUpdateBefore Whether this operator will generate UPDATE_BEFORE
+     *                             messages.
+     * @param stateRetentionTime   state idle retention time which unit is
+     *                             MILLISECONDS.
      */
     public GroupAggFunction(
             GeneratedAggsHandleFunction genAggsHandler,
@@ -107,7 +129,8 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
         // instantiate function
         StateTtlConfig ttlConfig = createTtlConfig(stateRetentionTime);
         function = genAggsHandler.newInstance(getRuntimeContext().getUserCodeClassLoader());
-        function.open(new PerKeyStateDataViewStore(getRuntimeContext(), ttlConfig));
+        dataViewStore = new PerKeyStateDataViewStore(getRuntimeContext(), ttlConfig);
+        function.open(dataViewStore);
         // instantiate equaliser
         equaliser = genRecordEqualiser.newInstance(getRuntimeContext().getUserCodeClassLoader());
 
@@ -119,6 +142,36 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
         accState = getRuntimeContext().getState(accDesc);
 
         resultRow = new JoinedRowData();
+    }
+
+    @Override
+    public void emitStateAndSwitchToStreaming(Context ctx, Collector<RowData> collector,
+            KeyedStateBackend<RowData> be) {
+        count++;
+        if ((count % 100) != 0) {
+            return;
+        }
+        LOG.info("emitStateAndSwitchToStreaming() count {}", count);
+
+        InternalTypeInfo<RowData> accTypeInfo = InternalTypeInfo.ofFields(accTypes);
+        ValueStateDescriptor<RowData> accDesc = new ValueStateDescriptor<>("accState", accTypeInfo);
+        TypeSerializer<RowData> serializer = accTypeInfo.toSerializer();
+        RowData namespace = new GenericRowData(0);
+        try {
+            be.applyToAllKeys(namespace, serializer, accDesc,
+                    (key, state) -> {
+                        LOG.info("BEEP: K: {} S: {} ", key, state.value());
+                    });
+        } catch (
+
+        Exception e) {
+            LOG.info("exception e: {}", e.toString());
+        }
+    }
+
+    @Override
+    public boolean isHybridStreamBatchCapable() {
+        return true;
     }
 
     @Override

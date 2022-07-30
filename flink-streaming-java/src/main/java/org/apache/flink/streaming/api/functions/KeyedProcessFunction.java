@@ -20,6 +20,7 @@ package org.apache.flink.streaming.api.functions;
 
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.common.functions.AbstractRichFunction;
+import org.apache.flink.runtime.state.KeyedStateBackend;
 import org.apache.flink.streaming.api.TimeDomain;
 import org.apache.flink.streaming.api.TimerService;
 import org.apache.flink.util.Collector;
@@ -28,18 +29,29 @@ import org.apache.flink.util.OutputTag;
 /**
  * A keyed function that processes elements of a stream.
  *
- * <p>For every element in the input stream {@link #processElement(Object, Context, Collector)} is
- * invoked. This can produce zero or more elements as output. Implementations can also query the
- * time and set timers through the provided {@link Context}. For firing timers {@link #onTimer(long,
- * OnTimerContext, Collector)} will be invoked. This can again produce zero or more elements as
+ * <p>
+ * For every element in the input stream
+ * {@link #processElement(Object, Context, Collector)} is
+ * invoked. This can produce zero or more elements as output. Implementations
+ * can also query the
+ * time and set timers through the provided {@link Context}. For firing timers
+ * {@link #onTimer(long,
+ * OnTimerContext, Collector)} will be invoked. This can again produce zero or
+ * more elements as
  * output and register further timers.
  *
- * <p><b>NOTE:</b> Access to keyed state and timers (which are also scoped to a key) is only
- * available if the {@code KeyedProcessFunction} is applied on a {@code KeyedStream}.
+ * <p>
+ * <b>NOTE:</b> Access to keyed state and timers (which are also scoped to a
+ * key) is only
+ * available if the {@code KeyedProcessFunction} is applied on a
+ * {@code KeyedStream}.
  *
- * <p><b>NOTE:</b> A {@code KeyedProcessFunction} is always a {@link
- * org.apache.flink.api.common.functions.RichFunction}. Therefore, access to the {@link
- * org.apache.flink.api.common.functions.RuntimeContext} is always available and setup and teardown
+ * <p>
+ * <b>NOTE:</b> A {@code KeyedProcessFunction} is always a {@link
+ * org.apache.flink.api.common.functions.RichFunction}. Therefore, access to the
+ * {@link
+ * org.apache.flink.api.common.functions.RuntimeContext} is always available and
+ * setup and teardown
  * methods can be implemented. See {@link
  * org.apache.flink.api.common.functions.RichFunction#open(org.apache.flink.configuration.Configuration)}
  * and {@link org.apache.flink.api.common.functions.RichFunction#close()}.
@@ -56,44 +68,72 @@ public abstract class KeyedProcessFunction<K, I, O> extends AbstractRichFunction
     /**
      * Process one element from the input stream.
      *
-     * <p>This function can output zero or more elements using the {@link Collector} parameter and
+     * <p>
+     * This function can output zero or more elements using the {@link Collector}
+     * parameter and
      * also update internal state or set timers using the {@link Context} parameter.
      *
      * @param value The input value.
-     * @param ctx A {@link Context} that allows querying the timestamp of the element and getting a
-     *     {@link TimerService} for registering timers and querying the time. The context is only
-     *     valid during the invocation of this method, do not store it.
-     * @param out The collector for returning result values.
-     * @throws Exception This method may throw exceptions. Throwing an exception will cause the
-     *     operation to fail and may trigger recovery.
+     * @param ctx   A {@link Context} that allows querying the timestamp of the
+     *              element and getting a
+     *              {@link TimerService} for registering timers and querying the
+     *              time. The context is only
+     *              valid during the invocation of this method, do not store it.
+     * @param out   The collector for returning result values.
+     * @throws Exception This method may throw exceptions. Throwing an exception
+     *                   will cause the
+     *                   operation to fail and may trigger recovery.
      */
     public abstract void processElement(I value, Context ctx, Collector<O> out) throws Exception;
+
+    /**
+     * Ask BatchSteam Function to transition from batch to streaming mode and emit
+     * its operator
+     * state as INSERT operations.
+     *
+     */
+    public void emitStateAndSwitchToStreaming(Context ctx, Collector<O> out, KeyedStateBackend<K> be) throws Exception {
+    }
+
+    public boolean isHybridStreamBatchCapable() {
+        return false;
+    }
 
     /**
      * Called when a timer set using {@link TimerService} fires.
      *
      * @param timestamp The timestamp of the firing timer.
-     * @param ctx An {@link OnTimerContext} that allows querying the timestamp, the {@link
-     *     TimeDomain}, and the key of the firing timer and getting a {@link TimerService} for
-     *     registering timers and querying the time. The context is only valid during the invocation
-     *     of this method, do not store it.
-     * @param out The collector for returning result values.
-     * @throws Exception This method may throw exceptions. Throwing an exception will cause the
-     *     operation to fail and may trigger recovery.
+     * @param ctx       An {@link OnTimerContext} that allows querying the
+     *                  timestamp, the {@link
+     *                  TimeDomain}, and the key of the firing timer and getting a
+     *                  {@link TimerService} for
+     *                  registering timers and querying the time. The context is
+     *                  only valid during the invocation
+     *                  of this method, do not store it.
+     * @param out       The collector for returning result values.
+     * @throws Exception This method may throw exceptions. Throwing an exception
+     *                   will cause the
+     *                   operation to fail and may trigger recovery.
      */
-    public void onTimer(long timestamp, OnTimerContext ctx, Collector<O> out) throws Exception {}
+    public void onTimer(long timestamp, OnTimerContext ctx, Collector<O> out) throws Exception {
+    }
 
     /**
-     * Information available in an invocation of {@link #processElement(Object, Context, Collector)}
+     * Information available in an invocation of
+     * {@link #processElement(Object, Context, Collector)}
      * or {@link #onTimer(long, OnTimerContext, Collector)}.
      */
     public abstract class Context {
 
         /**
-         * Timestamp of the element currently being processed or timestamp of a firing timer.
+         * Timestamp of the element currently being processed or timestamp of a firing
+         * timer.
          *
-         * <p>This might be {@code null}, for example if the time characteristic of your program is
-         * set to {@link org.apache.flink.streaming.api.TimeCharacteristic#ProcessingTime}.
+         * <p>
+         * This might be {@code null}, for example if the time characteristic of your
+         * program is
+         * set to
+         * {@link org.apache.flink.streaming.api.TimeCharacteristic#ProcessingTime}.
          */
         public abstract Long timestamp();
 
@@ -103,8 +143,9 @@ public abstract class KeyedProcessFunction<K, I, O> extends AbstractRichFunction
         /**
          * Emits a record to the side output identified by the {@link OutputTag}.
          *
-         * @param outputTag the {@code OutputTag} that identifies the side output to emit to.
-         * @param value The record to emit.
+         * @param outputTag the {@code OutputTag} that identifies the side output to
+         *                  emit to.
+         * @param value     The record to emit.
          */
         public abstract <X> void output(OutputTag<X> outputTag, X value);
 
@@ -113,7 +154,8 @@ public abstract class KeyedProcessFunction<K, I, O> extends AbstractRichFunction
     }
 
     /**
-     * Information available in an invocation of {@link #onTimer(long, OnTimerContext, Collector)}.
+     * Information available in an invocation of
+     * {@link #onTimer(long, OnTimerContext, Collector)}.
      */
     public abstract class OnTimerContext extends Context {
         /** The {@link TimeDomain} of the firing timer. */
