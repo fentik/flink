@@ -185,6 +185,75 @@ public class SinkUpsertMaterializer extends TableStreamOperator<RowData>
         return rowString;
     }
 
+
+    public String patreonPRMToString(RowData row) {
+        return "agg_key " + row.getString(0).toString() +  // agg_key
+               ", campaign_id " + row.getLong(1) +  //campaign_id
+               ", patron_id " + row.getLong(2) +  //patron_id
+               ", billing_cycle_id " + row.getInt(3) +  // billing_cycle_id
+               row.getInt(4) +  // is_follower
+               row.getString(5).toString() + // member_uuid
+               row.getString(6).toString() + //thumb_url
+               row.getString(7).toString() + // vanity
+               row.getString(8).toString() + // full_name
+               row.getString(9).toString() + // email
+               row.getString(10).toString() + //discord
+               " " + row.getBoolean(11)  +  //in_good_standing
+               " " + row.getBoolean(12) +  // is_follower0
+               " " + row.getBoolean(13) +  // is_cuf
+               " " + row.getBoolean(14) +  // is_annual
+               " " + row.getShort(15)  +    //user_is_deleted
+               row.getShort(16) +// user_is_nuked
+               row.getShort(17) +  // user_is_disabled
+               row.getBoolean(18) + //user_is_blocked
+               row.getBoolean(19) + // creator_is_blocked
+               row.getBoolean(20) +  // is_member
+               row.getString(21).toString() + // currency
+               row.getString(22).toString() + // campaign_currency
+               row.getLong(23) + // pledge_amount_cents
+               row.getInt(24) + // campaign_pledge_amount_cents
+               row.getLong(25) + // pledge_cap_amount_cents
+               row.getLong(26) + // lifetime_support_cents
+               row.getInt(27) + // campaign_lifetime_support_cents
+               row.getLong(28) + // will_pay_amount_cents
+               row.getString(29).toString() +  // pledge_status
+               row.getString(30).toString() +  //latest_bill_status
+               row.getTimestamp(31, 6).toString() + //latest_bill_failed_at
+               ", latest_bill_succeeded_at " + row.getTimestamp(32, 6).toString() + // latest_bill_succeeded_at
+               ", latest_bill_created_at " + row.getTimestamp(33, 6).toString() + // latest_bill_created_at
+               row.getString(34).toString() + //latest_patronage_purchase_status
+               // latest_patronage_purchase_created_at
+               ", latest_patronage_purchase_created_at " + row.getTimestamp(35, 6).toString() +
+               // latest_patronage_purchase_settled_at
+               ", latest_patronage_purchase_settled_at " + row.getTimestamp(36, 6).toString() +
+               row.getLong(37) + // pledge_id
+               row.getLong(38) + // pledge_cadence
+               row.getTimestamp(39, 6).toString() + // pledge_relationship_start
+               row.getTimestamp(40, 6).toString() + // pledge_relationship_end
+               ", last_charge_date " + row.getTimestamp(41, 6).toString() + // last_charge_date
+               row.getString(42).toString() +// last_charge_status
+               row.getTimestamp(43, 6).toString() + // next_charge_date
+               ", reward_id " + row.getLong(44) + // reward_id
+               row.getLong(45) + // reward_amount_cents
+               row.getString(46).toString() + //reward_description
+               row.getShort(47) +  // reward_requires_shipping
+               row.getString(48).toString() + // reward_title
+               row.getString(49).toString() + //benefit_ids
+               row.getShort(50) + // shipping_opt_out
+               row.getLong(51) + // shipping_address_id
+               row.getString(52).toString() + // shipping_address_name
+               row.getString(53).toString() +  // shipping_address_addressee
+               row.getString(54).toString() +  // shipping_address_line_1
+               row.getString(55).toString() +  // shipping_address_line_2
+               row.getString(56).toString() +  // shpping_adddress_postal_code
+               row.getString(57).toString() + // shipping_address_city
+               row.getString(58).toString() + // shipping_address_state
+               row.getString(59).toString() + // shipping_address_country
+               // Don't get shpping_address_coordinates
+               row.getString(61).toString() +  // shipping_address_phone_number
+               row.getString(62).toString();   //notes
+    }
+
     @Override
     public void processElement(StreamRecord<RowData> element) throws Exception {
         final RowData row = element.getValue();
@@ -202,10 +271,10 @@ public class SinkUpsertMaterializer extends TableStreamOperator<RowData>
         }
         if (this.shouldLogInput()) {
             if (this.physicalRowType != null) {
-                LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with key " + key + "(" + size + ")" + " to values {num entries: " + values.size() + "} : " +
-                this.rowToString(this.physicalRowType, row));
+                LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with key " + key + " (" + size + ")" + " to values {num entries: " + values.size() + "} : " +  this.rowToString(this.physicalRowType, row));
             } else {
-                LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with key " + key + "(" + size + ")" + " to values {num entries: " + values.size() + "} : " + element.toString());
+//                LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with key " + key + "(" + size + ")" + " to values {num entries: " + values.size() + "} : " + element.toString());
+                LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with value: " + patreonPRMToString(row) + " (" + size + ")" + " to values {num entries: " + values.size() + "}");
             }
         }
         switch (row.getRowKind()) {
@@ -242,10 +311,10 @@ public class SinkUpsertMaterializer extends TableStreamOperator<RowData>
             state.clear();
         } else {
             // We assume we are not going to get out-of-order entries for more than 20.
-            if (value.size() > 50) {
-                LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Removing 30 entries for " + key + " currently with " + values.size() + " values. Hopefully, this doesn't cause issues.");
-                removeN(values, 30);
-            }
+//            if (values.size() > 50) {
+//                LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Removing 30 entries for " + key + " currently with " + values.size() + " values. Hopefully, this doesn't cause issues.");
+              //  removeN(values, 30);
+         //   }
             state.update(values);
         }
     }
