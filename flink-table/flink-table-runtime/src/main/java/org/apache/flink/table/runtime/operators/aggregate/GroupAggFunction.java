@@ -24,6 +24,7 @@ import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
+import org.apache.flink.streaming.runtime.watermarkstatus.WatermarkStatus;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.utils.JoinedRowData;
@@ -36,8 +37,12 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Collector;
+import org.apache.flink.api.common.eventtime.Watermark;
 import org.apache.flink.api.common.state.MapState;
 import org.apache.flink.api.common.state.State;
+
+import org.apache.flink.runtime.state.VoidNamespace;
+import org.apache.flink.runtime.state.VoidNamespaceSerializer;
 
 import static org.apache.flink.table.data.util.RowDataUtil.isAccumulateMsg;
 import static org.apache.flink.table.data.util.RowDataUtil.isRetractMsg;
@@ -90,6 +95,13 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
     // stores the accumulators
     private transient ValueState<RowData> accState = null;
 
+    // are we in batch mode or streamnig?
+    // XXX(sergei): for now, always start in batch mode for this PoC code,
+    // longer term we will need to pick up per-job config parameters
+    private boolean isBatchMode = true;
+
+    KeyedStateBackend<RowData> lastBe;
+
     /**
      * Creates a {@link GroupAggFunction}.
      *
@@ -121,6 +133,7 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
         this.recordCounter = RecordCounter.of(indexOfCountStar);
         this.generateUpdateBefore = generateUpdateBefore;
         this.stateRetentionTime = stateRetentionTime;
+        this.isBatchMode = true;
     }
 
     @Override
@@ -142,31 +155,36 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
         accState = getRuntimeContext().getState(accDesc);
 
         resultRow = new JoinedRowData();
+        isBatchMode = true;
     }
 
-    @Override
-    public void emitStateAndSwitchToStreaming(Context ctx, Collector<RowData> collector,
+    public void emitStateAndSwitchToStreaming(Context ctx, Collector<RowData> out,
             KeyedStateBackend<RowData> be) {
-        count++;
-        if ((count % 100) != 0) {
+        if (!isBatchMode) {
+            LOG.warn("EMIT asked to transition from Batch to Stream while in Stream mode {}", this.toString());
             return;
         }
-        LOG.info("emitStateAndSwitchToStreaming() count {}", count);
 
+        LOG.info("EMIT trigerring Batch -> Stream edge for {} count so far {}", this, count);
         InternalTypeInfo<RowData> accTypeInfo = InternalTypeInfo.ofFields(accTypes);
         ValueStateDescriptor<RowData> accDesc = new ValueStateDescriptor<>("accState", accTypeInfo);
-        TypeSerializer<RowData> serializer = accTypeInfo.toSerializer();
-        RowData namespace = new GenericRowData(0);
-        try {
-            be.applyToAllKeys(namespace, serializer, accDesc,
-                    (key, state) -> {
-                        LOG.info("BEEP: K: {} S: {} ", key, state.value());
-                    });
-        } catch (
 
-        Exception e) {
+        try {
+            LOG.info("EMIT before apply all keys");
+            be.applyToAllKeys(VoidNamespace.INSTANCE, VoidNamespaceSerializer.INSTANCE, accDesc,
+                    (key, state) -> {
+                        function.setAccumulators(state.value());
+                        resultRow.replace(key, function.getValue()).setRowKind(RowKind.INSERT);
+                        LOG.info("EMIT {}", resultRow);
+                        out.collect(resultRow);
+                    });
+            LOG.info("EMIT after apply all keys");
+        } catch (Exception e) {
             LOG.info("exception e: {}", e.toString());
         }
+
+        isBatchMode = false;
+        LOG.info("EMIT entered streaming mode for {}", this);
     }
 
     @Override
@@ -174,9 +192,17 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
         return true;
     }
 
+    private void collectIfNotBatch(Collector<RowData> out, RowData output) {
+        /* Supress emitting row if we're in batch mode */
+        if (!isBatchMode) {
+            out.collect(output);
+        }
+    }
+
     @Override
     public void processElement(RowData input, Context ctx, Collector<RowData> out)
             throws Exception {
+        count++;
         RowData currentKey = ctx.getCurrentKey();
         boolean firstRow;
         RowData accumulators = accState.value();
@@ -233,7 +259,7 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
                         resultRow
                                 .replace(currentKey, prevAggValue)
                                 .setRowKind(RowKind.UPDATE_BEFORE);
-                        out.collect(resultRow);
+                        collectIfNotBatch(out, resultRow);
                     }
                     // prepare UPDATE_AFTER message for new row
                     resultRow.replace(currentKey, newAggValue).setRowKind(RowKind.UPDATE_AFTER);
@@ -244,15 +270,14 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
                 resultRow.replace(currentKey, newAggValue).setRowKind(RowKind.INSERT);
             }
 
-            out.collect(resultRow);
-
+            collectIfNotBatch(out, resultRow);
         } else {
             // we retracted the last record for this key
             // sent out a delete message
             if (!firstRow) {
                 // prepare delete message for previous row
                 resultRow.replace(currentKey, prevAggValue).setRowKind(RowKind.DELETE);
-                out.collect(resultRow);
+                collectIfNotBatch(out, resultRow);
             }
             // and clear all state
             accState.clear();

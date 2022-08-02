@@ -19,10 +19,12 @@
 package org.apache.flink.streaming.api.functions;
 
 import org.apache.flink.annotation.PublicEvolving;
+import org.apache.flink.api.common.eventtime.Watermark;
 import org.apache.flink.api.common.functions.AbstractRichFunction;
 import org.apache.flink.runtime.state.KeyedStateBackend;
 import org.apache.flink.streaming.api.TimeDomain;
 import org.apache.flink.streaming.api.TimerService;
+import org.apache.flink.streaming.runtime.watermarkstatus.WatermarkStatus;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.OutputTag;
 
@@ -87,16 +89,16 @@ public abstract class KeyedProcessFunction<K, I, O> extends AbstractRichFunction
     public abstract void processElement(I value, Context ctx, Collector<O> out) throws Exception;
 
     /**
-     * Ask BatchSteam Function to transition from batch to streaming mode and emit
-     * its operator
-     * state as INSERT operations.
-     *
+     * Hybrid Batch/Stream operators need to access the keyed state backend during
+     * processing so that they can correctly handle the switch from Batch to Steam
+     * mode.
      */
-    public void emitStateAndSwitchToStreaming(Context ctx, Collector<O> out, KeyedStateBackend<K> be) throws Exception {
-    }
-
     public boolean isHybridStreamBatchCapable() {
         return false;
+    }
+
+    public void emitStateAndSwitchToStreaming(Context ctx, Collector<O> out, KeyedStateBackend<K> be) throws Exception {
+        throw new Exception("EMIT programming error");
     }
 
     /**

@@ -18,6 +18,7 @@
 package org.apache.flink.streaming.api.operators;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.api.common.eventtime.Watermark;
 import org.apache.flink.runtime.state.KeyedStateBackend;
 import org.apache.flink.runtime.state.VoidNamespace;
 import org.apache.flink.runtime.state.VoidNamespaceSerializer;
@@ -26,6 +27,7 @@ import org.apache.flink.streaming.api.TimeDomain;
 import org.apache.flink.streaming.api.TimerService;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.streaming.runtime.watermarkstatus.WatermarkStatus;
 import org.apache.flink.util.OutputTag;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
@@ -41,6 +43,8 @@ public class KeyedProcessOperator<K, IN, OUT>
         implements OneInputStreamOperator<IN, OUT>, Triggerable<K, VoidNamespace> {
 
     private static final long serialVersionUID = 1L;
+
+    private int count = 0;
 
     private transient TimestampedCollector<OUT> collector;
 
@@ -82,12 +86,30 @@ public class KeyedProcessOperator<K, IN, OUT>
 
     @Override
     public void processElement(StreamRecord<IN> element) throws Exception {
+        count++;
         collector.setTimestamp(element);
         context.element = element;
         userFunction.processElement(element.getValue(), context, collector);
-        KeyedStateBackend<K> be = getKeyedStateBackend();
-        userFunction.emitStateAndSwitchToStreaming(context, collector, be);
+        // if (count == 1000) {
+        // LOG.info("EMIT ABSTRACT reached 1000, force emit in here");
+        // KeyedStateBackend<K> be = getKeyedStateBackend();
+        // userFunction.emitStateAndSwitchToStreaming(context, collector, be);
+        // }
         context.element = null;
+    }
+
+    public void processWatermark(Watermark mark) throws Exception {
+        LOG.info("WATERMARK {}", mark);
+    }
+
+    public void processWatermarkStatus(WatermarkStatus watermarkStatus)
+            throws Exception {
+        LOG.info("WATERMARK STATUS {} idIdle {}", watermarkStatus, watermarkStatus.isIdle());
+        super.processWatermarkStatus(watermarkStatus);
+        if (userFunction.isHybridStreamBatchCapable()) {
+            KeyedStateBackend<K> be = getKeyedStateBackend();
+            userFunction.emitStateAndSwitchToStreaming(context, collector, getKeyedStateBackend());
+        }
     }
 
     private void invokeUserFunction(TimeDomain timeDomain, InternalTimer<K, VoidNamespace> timer)
