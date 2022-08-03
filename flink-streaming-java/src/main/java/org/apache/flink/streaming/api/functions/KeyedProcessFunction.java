@@ -102,8 +102,8 @@ public abstract class KeyedProcessFunction<K, I, O> extends AbstractRichFunction
         throw new Exception("EMIT programming error");
     }
 
-    public boolean isStreamMode() {
-        return true;
+    public boolean isBatchMode() {
+        return false;
     }
 
     public Watermark getBackfillWatermark() {

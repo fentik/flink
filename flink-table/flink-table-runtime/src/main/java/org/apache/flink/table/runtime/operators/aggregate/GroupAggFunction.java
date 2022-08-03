@@ -58,7 +58,6 @@ import java.util.Iterator;
 /** Aggregate Function used for the groupby (without window) aggregate. */
 public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, RowData> {
 
-    private int count = 0;
     private static final long serialVersionUID = -4767158666069797704L;
 
     private static final Logger LOG = LoggerFactory.getLogger(GroupAggFunction.class);
@@ -98,10 +97,7 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
     // stores the accumulators
     private transient ValueState<RowData> accState = null;
 
-    // are we in batch mode or streamnig?
-    // XXX(sergei): for now, always start in batch mode for this PoC code,
-    // longer term we will need to pick up per-job config parameters
-    private boolean isBatchMode = true;
+    private boolean isStreamMode = true;
 
     KeyedStateBackend<RowData> lastBe;
 
@@ -144,6 +140,10 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
         return backfillWatermark;
     }
 
+    private String getPrintableName() {
+        return getRuntimeContext().getJobId() + " " + getRuntimeContext().getTaskName();
+    }
+
     @Override
     public void open(Configuration parameters) throws Exception {
         super.open(parameters);
@@ -165,28 +165,37 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
         resultRow = new JoinedRowData();
 
         if (backfillWatermark == null || backfillWatermark.getTimestamp() <= 0) {
-            this.isBatchMode = false;
-            LOG.info("Initializing batch capable {} in stream mode since no backfill watermark is specified", getRuntimeContext().getTaskName());
+            this.isStreamMode = true;
+            LOG.info("Initializing batch capable {} in stream mode since no backfill watermark is specified",
+                    getPrintableName());
         } else {
-            this.isBatchMode = true;
-            LOG.info("Initializing batch capable {} in Batch mode with backfill watermark {}", getRuntimeContext().getTaskName(), this.backfillWatermark);
+            this.isStreamMode = false;
+            LOG.info("Initializing batch capable {} in Batch mode with backfill watermark {}",
+                    getPrintableName(), this.backfillWatermark);
         }
+    }
+
+    public boolean isBatchMode() {
+        return !this.isStreamMode;
     }
 
     public void emitStateAndSwitchToStreaming(Context ctx, Collector<RowData> out,
             KeyedStateBackend<RowData> be) {
-        if (!isBatchMode) {
-            LOG.warn("Programming error in {} -- asked to switch to streaming while not in batch mode", getRuntimeContext().getTaskName());
+        if (isStreamMode) {
+            LOG.warn("Programming error in {} -- asked to switch to streaming while not in batch mode",
+                    getPrintableName());
             return;
         }
 
-        LOG.info("{} transitioning from Batch to Stream mode", getRuntimeContext().getTaskName());
+        LOG.info("{} transitioning from Batch to Stream mode", getPrintableName());
         InternalTypeInfo<RowData> accTypeInfo = InternalTypeInfo.ofFields(accTypes);
         ValueStateDescriptor<RowData> accDesc = new ValueStateDescriptor<>("accState", accTypeInfo);
 
         class Counter {
             public long count = 0;
-            Counter() {}
+
+            Counter() {
+            }
         }
 
         Counter counter = new Counter();
@@ -200,12 +209,14 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
                         out.collect(resultRow);
                     });
         } catch (Exception e) {
-            LOG.info("Error transitioning to stream mode in {} exception e: {}", getRuntimeContext().getTaskName(), e.toString());
+            LOG.info("Error transitioning to stream mode in {} exception e: {}", getPrintableName(),
+                    e.toString());
         }
 
-        LOG.info("{} transitioned to Stream mode and emitted {} records", getRuntimeContext().getTaskName(), counter.count);
+        LOG.info("{} transitioned to Stream mode and emitted {} records", getPrintableName(),
+                counter.count);
 
-        isBatchMode = false;
+        isStreamMode = true;
     }
 
     @Override
@@ -213,13 +224,9 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
         return true;
     }
 
-    public boolean isStreamMode() {
-        return !isBatchMode;
-    }
-
     private void collectIfNotBatch(Collector<RowData> out, RowData output) {
         /* Supress emitting row if we're in batch mode */
-        if (!isBatchMode) {
+        if (isStreamMode) {
             out.collect(output);
         }
     }
@@ -227,7 +234,6 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
     @Override
     public void processElement(RowData input, Context ctx, Collector<RowData> out)
             throws Exception {
-        count++;
         RowData currentKey = ctx.getCurrentKey();
         boolean firstRow;
         RowData accumulators = accState.value();

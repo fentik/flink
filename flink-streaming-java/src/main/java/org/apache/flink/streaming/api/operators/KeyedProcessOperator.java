@@ -91,19 +91,23 @@ public class KeyedProcessOperator<K, IN, OUT>
         context.element = null;
     }
 
-    public void processWatermark(Watermark mark) throws Exception {
-        LOG.info("WATERMARK isStreamCapable = {} isStreamMode = {} {} {}", userFunction.isHybridStreamBatchCapable(),
-                userFunction.isStreamMode(), this.getOperatorName(), mark);
+    private String getPrintableName() {
+        return this.getOperatorID() + " " + this.getOperatorName();
+    }
 
-        if (userFunction.isStreamMode()) {
-            // We are in streaming mode, default to standard watermark processing code
-            super.processWatermark(mark);
-        } else {
+    public void processWatermark(Watermark mark) throws Exception {
+        LOG.info("WATERMARK isBatchCapable = {} isBatchMode = {} {} {}", userFunction.isHybridStreamBatchCapable(),
+                userFunction.isBatchMode(), getPrintableName(), mark);
+
+        if (userFunction.isBatchMode()) {
             // we are in batch mode, do not re-emit watermark until we flip
             if (mark.getTimestamp() >= userFunction.getBackfillWatermark().getTimestamp()) {
                 userFunction.emitStateAndSwitchToStreaming(context, collector, getKeyedStateBackend());
                 super.processWatermark(mark);
             }
+        } else {
+            // We are in streaming mode, default to standard watermark processing code
+            super.processWatermark(mark);
         }
     }
 

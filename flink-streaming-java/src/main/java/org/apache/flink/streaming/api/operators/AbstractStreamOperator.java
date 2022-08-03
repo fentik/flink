@@ -665,7 +665,6 @@ public abstract class AbstractStreamOperator<OUT>
     }
 
     public void processWatermark(Watermark mark) throws Exception {
-        LOG.info("WATERMARK AGG {} {}", this.getOperatorName(), mark);
         if (timeServiceManager != null) {
             timeServiceManager.advanceWatermark(mark);
         }
