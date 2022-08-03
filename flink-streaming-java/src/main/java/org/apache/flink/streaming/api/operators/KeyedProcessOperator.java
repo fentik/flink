@@ -44,8 +44,6 @@ public class KeyedProcessOperator<K, IN, OUT>
 
     private static final long serialVersionUID = 1L;
 
-    private int count = 0;
-
     private transient TimestampedCollector<OUT> collector;
 
     private transient ContextImpl context;
@@ -86,28 +84,22 @@ public class KeyedProcessOperator<K, IN, OUT>
 
     @Override
     public void processElement(StreamRecord<IN> element) throws Exception {
-        count++;
+        LOG.info("KEYED curr wm {}", context.timerService.currentWatermark());
         collector.setTimestamp(element);
+        LOG.info("KEYED OPERATOR element timestamp {} hasTimestamp {}", element.getTimestamp(), element.hasTimestamp());
         context.element = element;
         userFunction.processElement(element.getValue(), context, collector);
-        // if (count == 1000) {
-        // LOG.info("EMIT ABSTRACT reached 1000, force emit in here");
-        // KeyedStateBackend<K> be = getKeyedStateBackend();
-        // userFunction.emitStateAndSwitchToStreaming(context, collector, be);
-        // }
         context.element = null;
     }
 
     public void processWatermark(Watermark mark) throws Exception {
         LOG.info("WATERMARK {}", mark);
-    }
+        if (!userFunction.isHybridStreamBatchCapable() || userFunction.isStreamMode()) {
+            return;
+        }
 
-    public void processWatermarkStatus(WatermarkStatus watermarkStatus)
-            throws Exception {
-        LOG.info("WATERMARK STATUS {} idIdle {}", watermarkStatus, watermarkStatus.isIdle());
-        super.processWatermarkStatus(watermarkStatus);
-        if (userFunction.isHybridStreamBatchCapable()) {
-            KeyedStateBackend<K> be = getKeyedStateBackend();
+        // Hybrid operator in batch mode, check watermark for transition
+        if (mark.getTimestamp() >= userFunction.getBackfillWatermark().getTimestamp()) {
             userFunction.emitStateAndSwitchToStreaming(context, collector, getKeyedStateBackend());
         }
     }

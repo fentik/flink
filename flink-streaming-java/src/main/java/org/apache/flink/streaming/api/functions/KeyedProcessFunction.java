@@ -66,6 +66,7 @@ import org.apache.flink.util.OutputTag;
 public abstract class KeyedProcessFunction<K, I, O> extends AbstractRichFunction {
 
     private static final long serialVersionUID = 1L;
+    static final Watermark defaultWatermark = new Watermark(-1L);
 
     /**
      * Process one element from the input stream.
@@ -99,6 +100,14 @@ public abstract class KeyedProcessFunction<K, I, O> extends AbstractRichFunction
 
     public void emitStateAndSwitchToStreaming(Context ctx, Collector<O> out, KeyedStateBackend<K> be) throws Exception {
         throw new Exception("EMIT programming error");
+    }
+
+    public boolean isStreamMode() {
+        return true;
+    }
+
+    public Watermark getBackfillWatermark() {
+        return defaultWatermark;
     }
 
     /**

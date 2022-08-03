@@ -665,7 +665,7 @@ public abstract class AbstractStreamOperator<OUT>
     }
 
     public void processWatermark(Watermark mark) throws Exception {
-        LOG.info("ABSTRACT WATERMARK {}", mark);
+        LOG.info("WATERMARK AGG {} {}", this.getOperatorName(), mark);
         if (timeServiceManager != null) {
             timeServiceManager.advanceWatermark(mark);
         }
@@ -673,7 +673,6 @@ public abstract class AbstractStreamOperator<OUT>
     }
 
     private void processWatermark(Watermark mark, int index) throws Exception {
-        LOG.info("ABSTRACT WATERMARK COMBINED {} index {}", mark, index);
         if (combinedWatermark.updateWatermark(index, mark.getTimestamp())) {
             processWatermark(new Watermark(combinedWatermark.getCombinedWatermark()));
         }

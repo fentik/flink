@@ -81,6 +81,9 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
     /** State idle retention time which unit is MILLISECONDS. */
     private final long stateRetentionTime;
 
+    /** timestamp of backfill watermark barrier */
+    private final Watermark backfillWatermark;
+
     private PerKeyStateDataViewStore dataViewStore = null;
 
     /** Reused output row. */
@@ -126,7 +129,8 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
             LogicalType[] accTypes,
             int indexOfCountStar,
             boolean generateUpdateBefore,
-            long stateRetentionTime) {
+            long stateRetentionTime,
+            long backfillWatermark) {
         this.genAggsHandler = genAggsHandler;
         this.genRecordEqualiser = genRecordEqualiser;
         this.accTypes = accTypes;
@@ -134,6 +138,16 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
         this.generateUpdateBefore = generateUpdateBefore;
         this.stateRetentionTime = stateRetentionTime;
         this.isBatchMode = true;
+
+        if (backfillWatermark <= 0) {
+            this.backfillWatermark = null;
+        } else {
+            this.backfillWatermark = new Watermark(backfillWatermark);
+        }
+    }
+
+    public Watermark getBackfillWatermark() {
+        return backfillWatermark;
     }
 
     @Override
@@ -175,7 +189,7 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
                     (key, state) -> {
                         function.setAccumulators(state.value());
                         resultRow.replace(key, function.getValue()).setRowKind(RowKind.INSERT);
-                        LOG.info("EMIT {}", resultRow);
+                        // LOG.info("EMIT {}", resultRow);
                         out.collect(resultRow);
                     });
             LOG.info("EMIT after apply all keys");
@@ -190,6 +204,10 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
     @Override
     public boolean isHybridStreamBatchCapable() {
         return true;
+    }
+
+    public boolean isStreamMode() {
+        return !isBatchMode;
     }
 
     private void collectIfNotBatch(Collector<RowData> out, RowData output) {

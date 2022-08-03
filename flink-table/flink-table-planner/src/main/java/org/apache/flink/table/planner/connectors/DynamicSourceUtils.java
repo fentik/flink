@@ -65,6 +65,11 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+
 import static org.apache.flink.table.types.logical.utils.LogicalTypeCasts.supportsExplicitCast;
 
 /** Utilities for dealing with {@link DynamicTableSource}. */
@@ -73,6 +78,7 @@ public final class DynamicSourceUtils {
 
     // Ensures that physical and metadata columns don't collide.
     public static final String METADATA_COLUMN_PREFIX = "$metadata$";
+    protected static final Logger LOG = LoggerFactory.getLogger(DynamicSourceUtils.class);
 
     /**
      * Converts a given {@link DataStream} to a {@link RelNode}. It adds helper projections if
@@ -136,6 +142,7 @@ public final class DynamicSourceUtils {
         }
 
         // 4. push watermark assigner
+	LOG.info("PLANNER in the codebase for watermark assigner test isBatchMode = {}, schema.getWatermarkSpecs().isEmpty() = {}", isBatchMode, schema.getWatermarkSpecs().isEmpty());
         if (!isBatchMode && !schema.getWatermarkSpecs().isEmpty()) {
             pushWatermarkAssigner(relBuilder, schema);
         }
