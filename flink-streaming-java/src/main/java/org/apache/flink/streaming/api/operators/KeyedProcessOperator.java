@@ -18,7 +18,8 @@
 package org.apache.flink.streaming.api.operators;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.api.common.eventtime.Watermark;
+//import org.apache.flink.api.common.eventtime.Watermark;
+import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.runtime.state.KeyedStateBackend;
 import org.apache.flink.runtime.state.VoidNamespace;
 import org.apache.flink.runtime.state.VoidNamespaceSerializer;
@@ -84,23 +85,25 @@ public class KeyedProcessOperator<K, IN, OUT>
 
     @Override
     public void processElement(StreamRecord<IN> element) throws Exception {
-        LOG.info("KEYED curr wm {}", context.timerService.currentWatermark());
         collector.setTimestamp(element);
-        LOG.info("KEYED OPERATOR element timestamp {} hasTimestamp {}", element.getTimestamp(), element.hasTimestamp());
         context.element = element;
         userFunction.processElement(element.getValue(), context, collector);
         context.element = null;
     }
 
     public void processWatermark(Watermark mark) throws Exception {
-        LOG.info("WATERMARK {}", mark);
-        if (!userFunction.isHybridStreamBatchCapable() || userFunction.isStreamMode()) {
-            return;
-        }
+        LOG.info("WATERMARK isStreamCapable = {} isStreamMode = {} {} {}", userFunction.isHybridStreamBatchCapable(),
+                userFunction.isStreamMode(), this.getOperatorName(), mark);
 
-        // Hybrid operator in batch mode, check watermark for transition
-        if (mark.getTimestamp() >= userFunction.getBackfillWatermark().getTimestamp()) {
-            userFunction.emitStateAndSwitchToStreaming(context, collector, getKeyedStateBackend());
+        if (userFunction.isStreamMode()) {
+            // We are in streaming mode, default to standard watermark processing code
+            super.processWatermark(mark);
+        } else {
+            // we are in batch mode, do not re-emit watermark until we flip
+            if (mark.getTimestamp() >= userFunction.getBackfillWatermark().getTimestamp()) {
+                userFunction.emitStateAndSwitchToStreaming(context, collector, getKeyedStateBackend());
+                super.processWatermark(mark);
+            }
         }
     }
 

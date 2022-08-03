@@ -137,13 +137,7 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
         this.recordCounter = RecordCounter.of(indexOfCountStar);
         this.generateUpdateBefore = generateUpdateBefore;
         this.stateRetentionTime = stateRetentionTime;
-        this.isBatchMode = true;
-
-        if (backfillWatermark <= 0) {
-            this.backfillWatermark = null;
-        } else {
-            this.backfillWatermark = new Watermark(backfillWatermark);
-        }
+        this.backfillWatermark = new Watermark(backfillWatermark);
     }
 
     public Watermark getBackfillWatermark() {
@@ -169,36 +163,49 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
         accState = getRuntimeContext().getState(accDesc);
 
         resultRow = new JoinedRowData();
-        isBatchMode = true;
+
+        if (backfillWatermark == null || backfillWatermark.getTimestamp() <= 0) {
+            this.isBatchMode = false;
+            LOG.info("Initializing batch capable {} in stream mode since no backfill watermark is specified", getRuntimeContext().getTaskName());
+        } else {
+            this.isBatchMode = true;
+            LOG.info("Initializing batch capable {} in Batch mode with backfill watermark {}", getRuntimeContext().getTaskName(), this.backfillWatermark);
+        }
     }
 
     public void emitStateAndSwitchToStreaming(Context ctx, Collector<RowData> out,
             KeyedStateBackend<RowData> be) {
         if (!isBatchMode) {
-            LOG.warn("EMIT asked to transition from Batch to Stream while in Stream mode {}", this.toString());
+            LOG.warn("Programming error in {} -- asked to switch to streaming while not in batch mode", getRuntimeContext().getTaskName());
             return;
         }
 
-        LOG.info("EMIT trigerring Batch -> Stream edge for {} count so far {}", this, count);
+        LOG.info("{} transitioning from Batch to Stream mode", getRuntimeContext().getTaskName());
         InternalTypeInfo<RowData> accTypeInfo = InternalTypeInfo.ofFields(accTypes);
         ValueStateDescriptor<RowData> accDesc = new ValueStateDescriptor<>("accState", accTypeInfo);
 
+        class Counter {
+            public long count = 0;
+            Counter() {}
+        }
+
+        Counter counter = new Counter();
+
         try {
-            LOG.info("EMIT before apply all keys");
             be.applyToAllKeys(VoidNamespace.INSTANCE, VoidNamespaceSerializer.INSTANCE, accDesc,
                     (key, state) -> {
                         function.setAccumulators(state.value());
                         resultRow.replace(key, function.getValue()).setRowKind(RowKind.INSERT);
-                        // LOG.info("EMIT {}", resultRow);
+                        counter.count++;
                         out.collect(resultRow);
                     });
-            LOG.info("EMIT after apply all keys");
         } catch (Exception e) {
-            LOG.info("exception e: {}", e.toString());
+            LOG.info("Error transitioning to stream mode in {} exception e: {}", getRuntimeContext().getTaskName(), e.toString());
         }
 
+        LOG.info("{} transitioned to Stream mode and emitted {} records", getRuntimeContext().getTaskName(), counter.count);
+
         isBatchMode = false;
-        LOG.info("EMIT entered streaming mode for {}", this);
     }
 
     @Override
