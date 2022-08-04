@@ -19,6 +19,7 @@
 package org.apache.flink.table.runtime.operators.rank;
 
 import org.apache.flink.api.common.state.MapState;
+import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.MapStateDescriptor;
 import org.apache.flink.api.common.state.StateTtlConfig;
 import org.apache.flink.api.common.state.ValueState;
@@ -35,6 +36,15 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.runtime.typeutils.SortedMapTypeInfo;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Collector;
+import org.apache.flink.api.common.eventtime.Watermark;
+
+import org.apache.flink.runtime.state.VoidNamespace;
+import org.apache.flink.runtime.state.VoidNamespaceSerializer;
+
+import org.apache.flink.runtime.state.KeyedStateBackend;
+import org.apache.flink.runtime.state.KeyedStateFunction;
+
+import org.apache.flink.table.runtime.util.RowDataStringSerializer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -64,6 +74,8 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
                     + "This will result in incorrect result. You can increase the state ttl to avoid this.";
 
     private final InternalTypeInfo<RowData> sortKeyType;
+    private final RowDataStringSerializer sortKeySerializer;
+    private final RowDataStringSerializer inputRowSerializer;
 
     // flag to skip records with non-exist error instead to fail, true by default.
     private final boolean lenient = true;
@@ -80,6 +92,11 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
 
     private final ComparableRecordComparator serializableComparator;
 
+    /** timestamp of backfill watermark barrier */
+    private final Watermark backfillWatermark;
+    private boolean isStreamMode = true;
+    private long count = 0;
+
     public RetractableTopNFunction(
             StateTtlConfig ttlConfig,
             InternalTypeInfo<RowData> inputRowType,
@@ -89,7 +106,8 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
             RankRange rankRange,
             GeneratedRecordEqualiser generatedEqualiser,
             boolean generateUpdateBefore,
-            boolean outputRankNumber) {
+            boolean outputRankNumber,
+            long backfillWatermark) {
         super(
                 ttlConfig,
                 inputRowType,
@@ -100,8 +118,11 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
                 generateUpdateBefore,
                 outputRankNumber);
         this.sortKeyType = sortKeySelector.getProducedType();
+        this.sortKeySerializer = new RowDataStringSerializer(this.sortKeyType);
+        this.inputRowSerializer = new RowDataStringSerializer(this.inputRowType);
         this.serializableComparator = comparableRecordComparator;
         this.generatedEqualiser = generatedEqualiser;
+        this.backfillWatermark = new Watermark(backfillWatermark);
     }
 
     @Override
@@ -129,6 +150,105 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
             valueStateDescriptor.enableTimeToLive(ttlConfig);
         }
         treeMap = getRuntimeContext().getState(valueStateDescriptor);
+
+        if (backfillWatermark == null || backfillWatermark.getTimestamp() <= 0) {
+            this.isStreamMode = true;
+            LOG.info("Initializing batch capable {} in stream mode since no backfill watermark is specified",
+                    getPrintableName());
+        } else {
+            this.isStreamMode = false;
+            LOG.info("Initializing batch capable {} in Batch mode with backfill watermark {}",
+                    getPrintableName(), this.backfillWatermark);
+        }
+    }
+
+    @Override
+    public boolean isHybridStreamBatchCapable() {
+        return true;
+    }
+
+    public boolean isBatchMode() {
+        return !this.isStreamMode;
+    }
+
+    private String getPrintableName() {
+        return getRuntimeContext().getJobId() + " " + getRuntimeContext().getTaskName();
+    }
+
+    public Watermark getBackfillWatermark() {
+        return backfillWatermark;
+    }
+
+    public void emitStateAndSwitchToStreaming(Context ctx, Collector<RowData> out,
+        KeyedStateBackend<RowData> be) {
+        if (isStreamMode) {
+            LOG.warn("Programming error in {} -- asked to switch to streaming while not in batch mode",
+                    getPrintableName());
+            return;
+        }
+
+        LOG.info("{} transitioning from Batch to Stream mode", getPrintableName());
+
+        class Counter {
+            public long count = 0;
+
+            Counter() {
+            }
+        }
+
+        Counter counter = new Counter();
+
+        ValueStateDescriptor<SortedMap<RowData, Long>> smValueStateDescriptor =
+                new ValueStateDescriptor<>(
+                        "sorted-map",
+                        new SortedMapTypeInfo<>(
+                                sortKeyType, BasicTypeInfo.LONG_TYPE_INFO, serializableComparator));
+
+        try {
+            be.applyToAllKeys(VoidNamespace.INSTANCE, VoidNamespaceSerializer.INSTANCE, smValueStateDescriptor,
+                    (key, value) -> {
+                        LOG.info("SORTED-MAP key {} value {}", sortKeySerializer.asString(key), value);
+                        counter.count++;
+                    });
+        } catch (Exception e) {
+            LOG.info("Error 1 transitioning to stream mode in {} exception e: {}", getPrintableName(),
+                    e.toString());
+        }
+
+        ListTypeInfo<RowData> valueTypeInfo = new ListTypeInfo<>(inputRowType);
+        MapStateDescriptor<RowData, List<RowData>> mapStateDescriptor =
+                new MapStateDescriptor<>("data-state", sortKeyType, valueTypeInfo);
+
+        try {
+            be.applyToAllKeys(VoidNamespace.INSTANCE,
+                VoidNamespaceSerializer.INSTANCE,
+                mapStateDescriptor,
+                new KeyedStateFunction<RowData, MapState<RowData, List<RowData>>>() {
+                    @Override
+                    public void process(RowData key, MapState<RowData, List<RowData>> state) throws Exception {
+                        LOG.info("DATA-STATE key {} value {}", sortKeySerializer.asString(key), state);
+                        Iterator<Map.Entry<RowData, List<RowData>>> iter = state.iterator();
+                        while (iter.hasNext()) {
+                            Map.Entry<RowData, List<RowData>> entry = iter.next();
+                            RowData entryKey = entry.getKey();
+                            List<RowData> inputs = entry.getValue();
+                            LOG.info("   >>> entryKey {} arity {}", sortKeySerializer.asString(entryKey), entryKey.getArity());
+                            for (RowData input : inputs) {
+                                LOG.info(" .   >>> input: {} arity {}", inputRowSerializer.asString(input), input.getArity());
+                            }
+                        }
+                        counter.count++;
+                    }
+                });
+        } catch (Exception e) {
+            LOG.info("Error 2 transitioning to stream mode in {} exception e: {}", getPrintableName(),
+                    e.toString());
+        }        
+
+        LOG.info("{} transitioned to Stream mode and emitted {} records", getPrintableName(),
+                counter.count);
+
+        isStreamMode = true;
     }
 
     @Override
@@ -248,6 +368,7 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
         boolean findsSortKey = false;
         while (iterator.hasNext() && isInRankEnd(currentRank)) {
             Map.Entry<RowData, Long> entry = iterator.next();
+            // LOG.info("entry key {} entry val {}", sortKeySerializer.asString(entry.getKey()), entry.getValue());
             RowData key = entry.getKey();
             if (!findsSortKey && key.equals(sortKey)) {
                 currentRank += entry.getValue();
@@ -292,6 +413,7 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
         while (iterator.hasNext() && isInRankEnd(curRank)) {
             Map.Entry<RowData, Long> entry = iterator.next();
             RowData key = entry.getKey();
+            // LOG.info("entry key {} entry val {}", sortKeySerializer.asString(key), entry.getValue());
             if (!findsSortKey && key.equals(sortKey)) {
                 curRank += entry.getValue();
                 if (isInRankRange(curRank)) {
