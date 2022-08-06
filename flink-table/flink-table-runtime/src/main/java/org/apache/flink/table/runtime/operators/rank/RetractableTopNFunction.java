@@ -240,41 +240,19 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
                                 }
                                 if (isInRankRange(currRank)) {
                                     counter.count++;
-                                    collectInsert(out, input);
+                                    if (outputRankNumber || hasOffset()) {
+                                        // emit with row number
+                                        collectInsert(out, input, currRank);
+                                    } else {
+                                        // emit without row number
+                                        collectInsert(out, input);
+                                    }
                                 }
                             }
                         }
                     }
                 });
  
-        // ListTypeInfo<RowData> valueTypeInfo = new ListTypeInfo<>(inputRowType);
-        // MapStateDescriptor<RowData, List<RowData>> mapStateDescriptor = new MapStateDescriptor<>(
-        //     "data-state",
-        //     sortKeyType, valueTypeInfo);
-        //
-        // be.applyToAllKeys(VoidNamespace.INSTANCE,
-        //         VoidNamespaceSerializer.INSTANCE,
-        //         mapStateDescriptor,
-        //         new KeyedStateFunction<RowData, MapState<RowData, List<RowData>>>() {
-        //             @Override
-        //             public void process(RowData key, MapState<RowData, List<RowData>> state) throws Exception {
-        //                 LOG.info("DATA-STATE key {} value {}", sortKeySerializer.asString(key), state);
-        //                 Iterator<Map.Entry<RowData, List<RowData>>> iter = state.iterator();
-        //                 while (iter.hasNext()) {
-        //                     Map.Entry<RowData, List<RowData>> entry = iter.next();
-        //                     RowData entryKey = entry.getKey();
-        //                     List<RowData> inputs = entry.getValue();
-        //                     LOG.info("   >>> entryKey {} arity {}", sortKeySerializer.asString(entryKey),
-        //                             entryKey.getArity());
-        //                     for (RowData input : inputs) {
-        //                         LOG.info(" .   >>> input: {} arity {}", inputRowSerializer.asString(input),
-        //                                 input.getArity());
-        //                     }
-        //                 }
-        //                 counter.count++;
-        //             }
-        //         });
-
         LOG.info("{} transitioned to Stream mode and emitted {} records", getPrintableName(),
                 counter.count);
 
