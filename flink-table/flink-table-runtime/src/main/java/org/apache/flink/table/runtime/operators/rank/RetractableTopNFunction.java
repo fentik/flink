@@ -222,7 +222,6 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
                 new KeyedStateFunction<RowData, ValueState<SortedMap<RowData, Long>>>() {
                     @Override
                     public void process(RowData key, ValueState<SortedMap<RowData, Long>> state) throws Exception {
-                        LOG.info("SORTED-MAP key {}", sortKeySerializer.asString(key));
                         long currRank = 0L;
 
                         // The access to dataState.get() below requires a current key
