@@ -36,6 +36,7 @@ import org.apache.flink.table.runtime.operators.join.stream.state.OuterJoinRecor
 import org.apache.flink.table.runtime.operators.join.stream.state.OuterJoinRecordStateViews;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.types.RowKind;
+import org.apache.flink.table.runtime.util.RowDataStringSerializer;
 
 /** Streaming unbounded Join operator which supports INNER/LEFT/RIGHT/FULL JOIN. */
 public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
@@ -74,7 +75,8 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
             boolean leftIsOuter,
             boolean rightIsOuter,
             boolean[] filterNullKeys,
-            long stateRetentionTime) {
+            long stateRetentionTime,
+            long backfillWatermark) {
         super(
                 leftType,
                 rightType,
@@ -82,7 +84,8 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                 leftInputSideSpec,
                 rightInputSideSpec,
                 filterNullKeys,
-                stateRetentionTime);
+                stateRetentionTime,
+                backfillWatermark);
         this.leftIsOuter = leftIsOuter;
         this.rightIsOuter = rightIsOuter;
     }
@@ -148,6 +151,17 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
     @Override
     public void processElement2(StreamRecord<RowData> element) throws Exception {
         processElement(element.getValue(), rightRecordStateView, leftRecordStateView, false);
+    }
+
+    @Override
+    protected boolean isHybridStreamBatchCapable() {
+        return true;
+    }
+
+    @Override
+    protected void emitStateAndSwitchToStreaming() throws Exception {
+        LOG.info("{} emit and switch to streaming", getPrintableName());
+        setStreamMode(true);
     }
 
 
@@ -235,7 +249,8 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         this.associatedRecordsSizeSum.inc(associatedRecords.size());
         this.associatedRecordsCallCount.inc();
         if (this.shouldLogInput()) {
-            LOG.info("Processing input row: " + rowToString(inputIsLeft ? leftType : rightType, input));
+            RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(inputIsLeft ? leftType : rightType);
+            LOG.info("Processing input row: " + rowStringSerializer.asString(input));
         }
         if (isAccumulateMsg) { // record is accumulate
             if (inputIsOuter) { // input side is outer

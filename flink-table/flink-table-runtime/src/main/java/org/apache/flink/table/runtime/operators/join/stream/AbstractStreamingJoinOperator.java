@@ -44,7 +44,11 @@ import org.apache.flink.types.Row;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.util.Collector;
 import org.apache.flink.table.types.utils.TypeConversions;
+import org.apache.flink.streaming.api.watermark.Watermark;
+
+
 
 import java.util.Arrays;
 
@@ -78,6 +82,9 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
     protected transient JoinConditionWithNullFilters joinCondition;
     protected transient TimestampedCollector<RowData> collector;
 
+    protected long backfillWatermark;
+    private boolean isStreamMode = true;
+
     public AbstractStreamingJoinOperator(
             InternalTypeInfo<RowData> leftType,
             InternalTypeInfo<RowData> rightType,
@@ -85,7 +92,8 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
             JoinInputSideSpec leftInputSideSpec,
             JoinInputSideSpec rightInputSideSpec,
             boolean[] filterNullKeys,
-            long stateRetentionTime) {
+            long stateRetentionTime,
+            long backfillWatermark) {
         this.leftType = leftType;
         this.rightType = rightType;
         this.generatedJoinCondition = generatedJoinCondition;
@@ -93,6 +101,8 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
         this.rightInputSideSpec = rightInputSideSpec;
         this.stateRetentionTime = stateRetentionTime;
         this.filterNullKeys = filterNullKeys;
+        this.backfillWatermark = backfillWatermark;
+        this.isStreamMode = true;
     }
 
     @Override
@@ -105,6 +115,52 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
         this.joinCondition.open(new Configuration());
 
         this.collector = new TimestampedCollector<>(output);
+
+        if (!isHybridStreamBatchCapable()) {
+            LOG.info("{} not stream batch capable", getPrintableName());
+        } else if (backfillWatermark <= 0) {
+            this.isStreamMode = true;
+            LOG.info("Initializing batch capable {} in stream mode since no backfill watermark is specified",
+                    getPrintableName());
+        } else {
+            this.isStreamMode = false;
+            LOG.info("Initializing batch capable {} in Batch mode with backfill watermark {}",
+                    getPrintableName(), this.backfillWatermark);
+        }
+    }
+
+    protected String getPrintableName() {
+        return getRuntimeContext().getJobId() + " " + getRuntimeContext().getTaskName();
+    }
+
+    protected abstract boolean isHybridStreamBatchCapable();
+
+    protected boolean isBatchMode() {
+        return !isStreamMode;
+    }
+
+    protected void setStreamMode(boolean mode) {
+        isStreamMode = mode;
+    }
+
+    protected void emitStateAndSwitchToStreaming() throws Exception {
+        throw new Exception(getPrintableName() + ": programming error does not support batch mode");
+    }
+
+    public void processWatermark(Watermark mark) throws Exception {
+        LOG.info("WATERMARK isBatchCapable = {} isBatchMode = {} {} {}", isHybridStreamBatchCapable(),
+            isBatchMode(), getPrintableName(), mark);
+
+        if (isBatchMode()) {
+            // we are in batch mode, do not re-emit watermark until we flip
+            if (mark.getTimestamp() >= backfillWatermark) {
+                emitStateAndSwitchToStreaming();
+                super.processWatermark(mark);
+            }
+        } else {
+            // We are in streaming mode, default to standard watermark processing code
+            super.processWatermark(mark);
+        }
     }
 
     @Override
