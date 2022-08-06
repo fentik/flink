@@ -56,10 +56,14 @@ import java.util.Map;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
+import java.io.IOException;
+
 /**
  * A TopN function could handle updating stream.
  *
- * <p>Input stream can contain any change kind: INSERT, DELETE, UPDATE_BEFORE and UPDATE_AFTER.
+ * <p>
+ * Input stream can contain any change kind: INSERT, DELETE, UPDATE_BEFORE and
+ * UPDATE_AFTER.
  */
 public class RetractableTopNFunction extends AbstractTopNFunction {
 
@@ -67,11 +71,11 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
 
     private static final Logger LOG = LoggerFactory.getLogger(RetractableTopNFunction.class);
 
-    // Message to indicate the state is cleared because of ttl restriction. The message could be
+    // Message to indicate the state is cleared because of ttl restriction. The
+    // message could be
     // used to output to log.
-    private static final String STATE_CLEARED_WARN_MSG =
-            "The state is cleared because of state ttl. "
-                    + "This will result in incorrect result. You can increase the state ttl to avoid this.";
+    private static final String STATE_CLEARED_WARN_MSG = "The state is cleared because of state ttl. "
+            + "This will result in incorrect result. You can increase the state ttl to avoid this.";
 
     private final InternalTypeInfo<RowData> sortKeyType;
     private final RowDataStringSerializer sortKeySerializer;
@@ -134,18 +138,17 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
         generatedEqualiser = null;
 
         ListTypeInfo<RowData> valueTypeInfo = new ListTypeInfo<>(inputRowType);
-        MapStateDescriptor<RowData, List<RowData>> mapStateDescriptor =
-                new MapStateDescriptor<>("data-state", sortKeyType, valueTypeInfo);
+        MapStateDescriptor<RowData, List<RowData>> mapStateDescriptor = new MapStateDescriptor<>("data-state",
+                sortKeyType, valueTypeInfo);
         if (ttlConfig.isEnabled()) {
             mapStateDescriptor.enableTimeToLive(ttlConfig);
         }
         dataState = getRuntimeContext().getMapState(mapStateDescriptor);
 
-        ValueStateDescriptor<SortedMap<RowData, Long>> valueStateDescriptor =
-                new ValueStateDescriptor<>(
-                        "sorted-map",
-                        new SortedMapTypeInfo<>(
-                                sortKeyType, BasicTypeInfo.LONG_TYPE_INFO, serializableComparator));
+        ValueStateDescriptor<SortedMap<RowData, Long>> valueStateDescriptor = new ValueStateDescriptor<>(
+                "sorted-map",
+                new SortedMapTypeInfo<>(
+                        sortKeyType, BasicTypeInfo.LONG_TYPE_INFO, serializableComparator));
         if (ttlConfig.isEnabled()) {
             valueStateDescriptor.enableTimeToLive(ttlConfig);
         }
@@ -180,7 +183,7 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
     }
 
     public void emitStateAndSwitchToStreaming(Context ctx, Collector<RowData> out,
-        KeyedStateBackend<RowData> be) {
+            KeyedStateBackend<RowData> be) throws Exception {
         if (isStreamMode) {
             LOG.warn("Programming error in {} -- asked to switch to streaming while not in batch mode",
                     getPrintableName());
@@ -198,52 +201,80 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
 
         Counter counter = new Counter();
 
-        ValueStateDescriptor<SortedMap<RowData, Long>> smValueStateDescriptor =
-                new ValueStateDescriptor<>(
-                        "sorted-map",
-                        new SortedMapTypeInfo<>(
-                                sortKeyType, BasicTypeInfo.LONG_TYPE_INFO, serializableComparator));
+        /*
+         * SORTED-MAP
+         * . Map<PARTITION BY clause,
+         * ... SortedMap<ORDER BY clause, MAX ROW NUM>>
+         * 
+         * DATA-MAP
+         * . Map<PARTITION BY clause,
+         * ... Map<ORDER BY clause, List<matching INPUT ROWS>>
+         */
+        ValueStateDescriptor<SortedMap<RowData, Long>> smValueStateDescriptor = new ValueStateDescriptor<>(
+            "sorted-map",
+            new SortedMapTypeInfo<>(
+                sortKeyType, BasicTypeInfo.LONG_TYPE_INFO, serializableComparator));
 
-        try {
-            be.applyToAllKeys(VoidNamespace.INSTANCE, VoidNamespaceSerializer.INSTANCE, smValueStateDescriptor,
-                    (key, value) -> {
-                        LOG.info("SORTED-MAP key {} value {}", sortKeySerializer.asString(key), value);
-                        counter.count++;
-                    });
-        } catch (Exception e) {
-            LOG.info("Error 1 transitioning to stream mode in {} exception e: {}", getPrintableName(),
-                    e.toString());
-        }
 
-        ListTypeInfo<RowData> valueTypeInfo = new ListTypeInfo<>(inputRowType);
-        MapStateDescriptor<RowData, List<RowData>> mapStateDescriptor =
-                new MapStateDescriptor<>("data-state", sortKeyType, valueTypeInfo);
-
-        try {
-            be.applyToAllKeys(VoidNamespace.INSTANCE,
+        be.applyToAllKeys(VoidNamespace.INSTANCE,
                 VoidNamespaceSerializer.INSTANCE,
-                mapStateDescriptor,
-                new KeyedStateFunction<RowData, MapState<RowData, List<RowData>>>() {
+                smValueStateDescriptor,
+                new KeyedStateFunction<RowData, ValueState<SortedMap<RowData, Long>>>() {
                     @Override
-                    public void process(RowData key, MapState<RowData, List<RowData>> state) throws Exception {
-                        LOG.info("DATA-STATE key {} value {}", sortKeySerializer.asString(key), state);
-                        Iterator<Map.Entry<RowData, List<RowData>>> iter = state.iterator();
-                        while (iter.hasNext()) {
-                            Map.Entry<RowData, List<RowData>> entry = iter.next();
+                    public void process(RowData key, ValueState<SortedMap<RowData, Long>> state) throws Exception {
+                        LOG.info("SORTED-MAP key {}", sortKeySerializer.asString(key));
+                        long currRank = 0L;
+
+                        // The access to dataState.get() below requires a current key
+                        // set for partioned stream operators.
+                        be.setCurrentKey(key);
+
+                        for (Map.Entry<RowData, Long> entry : state.value().entrySet()) {
                             RowData entryKey = entry.getKey();
-                            List<RowData> inputs = entry.getValue();
-                            LOG.info("   >>> entryKey {} arity {}", sortKeySerializer.asString(entryKey), entryKey.getArity());
+                            Long entryVal = entry.getValue();
+                            List<RowData> inputs = dataState.get(entryKey);
                             for (RowData input : inputs) {
-                                LOG.info(" .   >>> input: {} arity {}", inputRowSerializer.asString(input), input.getArity());
+                                currRank++;
+                                if (!isInRankEnd(currRank)) {
+                                    // short circuit, we're dont with this partition key
+                                    return;
+                                }
+                                if (isInRankRange(currRank)) {
+                                    counter.count++;
+                                    collectInsert(out, input);
+                                }
                             }
                         }
-                        counter.count++;
                     }
                 });
-        } catch (Exception e) {
-            LOG.info("Error 2 transitioning to stream mode in {} exception e: {}", getPrintableName(),
-                    e.toString());
-        }        
+ 
+        // ListTypeInfo<RowData> valueTypeInfo = new ListTypeInfo<>(inputRowType);
+        // MapStateDescriptor<RowData, List<RowData>> mapStateDescriptor = new MapStateDescriptor<>(
+        //     "data-state",
+        //     sortKeyType, valueTypeInfo);
+        //
+        // be.applyToAllKeys(VoidNamespace.INSTANCE,
+        //         VoidNamespaceSerializer.INSTANCE,
+        //         mapStateDescriptor,
+        //         new KeyedStateFunction<RowData, MapState<RowData, List<RowData>>>() {
+        //             @Override
+        //             public void process(RowData key, MapState<RowData, List<RowData>> state) throws Exception {
+        //                 LOG.info("DATA-STATE key {} value {}", sortKeySerializer.asString(key), state);
+        //                 Iterator<Map.Entry<RowData, List<RowData>>> iter = state.iterator();
+        //                 while (iter.hasNext()) {
+        //                     Map.Entry<RowData, List<RowData>> entry = iter.next();
+        //                     RowData entryKey = entry.getKey();
+        //                     List<RowData> inputs = entry.getValue();
+        //                     LOG.info("   >>> entryKey {} arity {}", sortKeySerializer.asString(entryKey),
+        //                             entryKey.getArity());
+        //                     for (RowData input : inputs) {
+        //                         LOG.info(" .   >>> input: {} arity {}", inputRowSerializer.asString(input),
+        //                                 input.getArity());
+        //                     }
+        //                 }
+        //                 counter.count++;
+        //             }
+        //         });
 
         LOG.info("{} transitioned to Stream mode and emitted {} records", getPrintableName(),
                 counter.count);
@@ -342,6 +373,8 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
         treeMap.update(sortedMap);
     }
 
+
+
     // ------------- ROW_NUMBER-------------------------------
 
     private void processStateStaled(Iterator<Map.Entry<RowData, Long>> sortedMapIterator)
@@ -362,13 +395,16 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
             RowData inputRow,
             Collector<RowData> out)
             throws Exception {
+        if (!isStreamMode) {
+            // do not emit records while in batch mode
+            return;
+        }
         Iterator<Map.Entry<RowData, Long>> iterator = sortedMap.entrySet().iterator();
         long currentRank = 0L;
         RowData currentRow = null;
         boolean findsSortKey = false;
         while (iterator.hasNext() && isInRankEnd(currentRank)) {
             Map.Entry<RowData, Long> entry = iterator.next();
-            // LOG.info("entry key {} entry val {}", sortKeySerializer.asString(entry.getKey()), entry.getValue());
             RowData key = entry.getKey();
             if (!findsSortKey && key.equals(sortKey)) {
                 currentRank += entry.getValue();
@@ -405,6 +441,10 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
             RowData inputRow,
             Collector<RowData> out)
             throws Exception {
+        if (!isStreamMode) {
+            // do not emit records while in batch mode
+            return;
+        }
         Iterator<Map.Entry<RowData, Long>> iterator = sortedMap.entrySet().iterator();
         long curRank = 0L;
         boolean findsSortKey = false;
@@ -413,7 +453,8 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
         while (iterator.hasNext() && isInRankEnd(curRank)) {
             Map.Entry<RowData, Long> entry = iterator.next();
             RowData key = entry.getKey();
-            // LOG.info("entry key {} entry val {}", sortKeySerializer.asString(key), entry.getValue());
+            // LOG.info("entry key {} entry val {}", sortKeySerializer.asString(key),
+            // entry.getValue());
             if (!findsSortKey && key.equals(sortKey)) {
                 curRank += entry.getValue();
                 if (isInRankRange(curRank)) {
@@ -450,7 +491,12 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
     }
 
     /**
-     * Retract the input record and emit updated records. This works for outputting with row_number.
+     * Retract the input record and emit updated records. This works for outputting
+     * with row_number.
+     *
+     * While we can simly short circuit the emitRecords* methods while not in stream
+     * mode, the retract* methods modify the state, so we need to have more fine grained
+     * handling of supressing collect calls.
      *
      * @return true if the input record has been removed from {@link #dataState}.
      */
@@ -480,8 +526,10 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
                             findsSortKey = true;
                             inputIter.remove();
                         } else if (findsSortKey) {
-                            collectUpdateBefore(out, prevRow, currentRank);
-                            collectUpdateAfter(out, currentRow, currentRank);
+                            if (isStreamMode) {
+                                collectUpdateBefore(out, prevRow, currentRank);
+                                collectUpdateAfter(out, currentRow, currentRank);
+                            }
                             prevRow = currentRow;
                         }
                         currentRank += 1;
@@ -500,8 +548,10 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
                     int i = 0;
                     while (i < inputs.size() && isInRankEnd(currentRank)) {
                         RowData currentRow = inputs.get(i);
-                        collectUpdateBefore(out, prevRow, currentRank);
-                        collectUpdateAfter(out, currentRow, currentRank);
+                        if (isStreamMode) {
+                            collectUpdateBefore(out, prevRow, currentRank);
+                            collectUpdateAfter(out, currentRow, currentRank);
+                        }
                         prevRow = currentRow;
                         currentRank += 1;
                         i++;
@@ -512,15 +562,19 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
             }
         }
         if (isInRankEnd(currentRank)) {
-            // there is no enough elements in Top-N, emit DELETE message for the retract record.
-            collectDelete(out, prevRow, currentRank);
+            // there is no enough elements in Top-N, emit DELETE message for the retract
+            // record.
+            if (isStreamMode) {
+                collectDelete(out, prevRow, currentRank);
+            }
         }
 
         return findsSortKey;
     }
 
     /**
-     * Retract the input record and emit updated records. This works for outputting without
+     * Retract the input record and emit updated records. This works for outputting
+     * without
      * row_number.
      *
      * @return true if the input record has been removed from {@link #dataState}.
@@ -546,12 +600,14 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
                     while (inputIter.hasNext() && isInRankEnd(nextRank)) {
                         RowData prevRow = inputIter.next();
                         if (!findsSortKey && equaliser.equals(prevRow, inputRow)) {
-                            collectDelete(out, prevRow, nextRank);
+                            if (isStreamMode) {
+                                collectDelete(out, prevRow, nextRank);
+                            }
                             nextRank -= 1;
                             findsSortKey = true;
                             inputIter.remove();
                         } else if (findsSortKey) {
-                            if (nextRank == rankEnd) {
+                            if (nextRank == rankEnd && isStreamMode) {
                                 collectInsert(out, prevRow, nextRank);
                             }
                         }
@@ -576,8 +632,10 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
                     if (inputs == null) {
                         processStateStaled(iterator);
                     } else {
-                        RowData toAdd = inputs.get(index);
-                        collectInsert(out, toAdd);
+                        if (isStreamMode) {
+                            RowData toAdd = inputs.get(index);
+                            collectInsert(out, toAdd);
+                        }
                         break;
                     }
                 }
