@@ -223,12 +223,11 @@ public final class JoinRecordStateViews {
                 new KeyedStateFunction<RowData, MapState<RowData, RowData>>() {
                     @Override
                     public void process(RowData key, MapState<RowData, RowData> state) throws Exception {
+                        // set current key context for otherView fetch
+                        be.setCurrentKey(key);
+
                         for (Map.Entry<RowData, RowData> entry : state.entries()) {
                             RowData thisRow = entry.getValue();
-
-                            // set current key context for otherView fetch
-                            be.setCurrentKey(key);
-
                             Iterable<RowData> records = otherView.getRecords();
                             for (RowData otherRow : records) {
                                 boolean matched = condition.apply(thisRow, otherRow);
@@ -337,12 +336,12 @@ public final class JoinRecordStateViews {
                 new KeyedStateFunction<RowData, MapState<RowData, Integer>>() {
                     @Override
                     public void process(RowData key, MapState<RowData, Integer> state) throws Exception {
+                        // set current key context for otherView fetch
+                        be.setCurrentKey(key);
+
                         for (Map.Entry<RowData, Integer> entry : state.entries()) {
                             RowData thisRow = entry.getKey();
                             Integer numRows = entry.getValue();
-
-                            // set current key context for otherView fetch
-                            be.setCurrentKey(key);
 
                             Iterable<RowData> records = otherView.getRecords();
                             for (RowData otherRow : records) {

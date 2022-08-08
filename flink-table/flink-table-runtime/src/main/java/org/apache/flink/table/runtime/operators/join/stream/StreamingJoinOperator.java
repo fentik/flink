@@ -121,6 +121,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                     "left-records",
                     leftInputSideSpec,
                     leftType,
+                    rightType,
                     stateRetentionTime);
         } else {
             this.leftRecordStateView = JoinRecordStateViews.create(
@@ -137,6 +138,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                     "right-records",
                     rightInputSideSpec,
                     rightType,
+                    leftType,
                     stateRetentionTime);
         } else {
             this.rightRecordStateView = JoinRecordStateViews.create(
@@ -386,7 +388,6 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
 
     private void output(RowData inputRow, RowData otherRow, boolean inputIsLeft) {
         if (isBatchMode()) {
-                        LOG.info("BATCH BATCH WRONG");
             return;
         }
         if (inputIsLeft) {
@@ -399,7 +400,6 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
 
     private void outputNullPadding(RowData row, boolean isLeft) {
         if (isBatchMode()) {
-                        LOG.info("BATCH BATCH WRONG");
             return;
         }
         if (isLeft) {

@@ -29,6 +29,7 @@ import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.typeutils.TupleTypeInfo;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.util.IterableIterator;
 import org.apache.flink.util.Collector;
@@ -38,11 +39,15 @@ import org.apache.flink.runtime.state.KeyedStateBackend;
 import org.apache.flink.runtime.state.KeyedStateFunction;
 import org.apache.flink.table.runtime.generated.JoinCondition;
 import org.apache.flink.types.RowKind;
+import org.apache.flink.table.data.utils.JoinedRowData;
 
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static org.apache.flink.table.runtime.util.StateConfigUtil.createTtlConfig;
 import static org.apache.flink.util.Preconditions.checkNotNull;
@@ -53,6 +58,8 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  */
 public final class OuterJoinRecordStateViews {
 
+    private static final Logger LOG = LoggerFactory.getLogger(OuterJoinRecordStateViews.class);
+
     /**
      * Creates a {@link OuterJoinRecordStateView} depends on
      * {@link JoinInputSideSpec}.
@@ -62,6 +69,7 @@ public final class OuterJoinRecordStateViews {
             String stateName,
             JoinInputSideSpec inputSideSpec,
             InternalTypeInfo<RowData> recordType,
+            InternalTypeInfo<RowData> otherRecordType,
             long retentionTime) {
         StateTtlConfig ttlConfig = createTtlConfig(retentionTime);
         if (inputSideSpec.hasUniqueKey()) {
@@ -75,11 +83,12 @@ public final class OuterJoinRecordStateViews {
                         recordType,
                         inputSideSpec.getUniqueKeyType(),
                         inputSideSpec.getUniqueKeySelector(),
+                        otherRecordType,
                         ttlConfig);
             }
         } else {
             return new OuterJoinRecordStateViews.InputSideHasNoUniqueKey(
-                    ctx, stateName, recordType, ttlConfig);
+                    ctx, stateName, recordType, otherRecordType, ttlConfig);
         }
     }
 
@@ -163,6 +172,10 @@ public final class OuterJoinRecordStateViews {
         // stores record in the mapping <UK, <Record, associated-num>>
         private final MapState<RowData, Tuple2<RowData, Integer>> recordState;
         private final KeySelector<RowData, RowData> uniqueKeySelector;
+        private final String stateName;
+        private final InternalTypeInfo<RowData> recordType;
+        private final InternalTypeInfo<RowData> uniqueKeyType;
+        private final GenericRowData otherNullRow;
 
         private InputSideHasUniqueKey(
                 RuntimeContext ctx,
@@ -170,6 +183,7 @@ public final class OuterJoinRecordStateViews {
                 InternalTypeInfo<RowData> recordType,
                 InternalTypeInfo<RowData> uniqueKeyType,
                 KeySelector<RowData, RowData> uniqueKeySelector,
+                InternalTypeInfo<RowData> otherRecordType,
                 StateTtlConfig ttlConfig) {
             checkNotNull(uniqueKeyType);
             checkNotNull(uniqueKeySelector);
@@ -181,6 +195,10 @@ public final class OuterJoinRecordStateViews {
             }
             this.recordState = ctx.getMapState(recordStateDesc);
             this.uniqueKeySelector = uniqueKeySelector;
+            this.stateName = stateName;
+            this.recordType = recordType;
+            this.uniqueKeyType = uniqueKeyType;
+            this.otherNullRow = new GenericRowData(otherRecordType.toRowSize());
         }
 
         @Override
@@ -221,7 +239,41 @@ public final class OuterJoinRecordStateViews {
         @Override
         public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
                 JoinRecordStateView otherView, JoinCondition condition) throws Exception {
-            throw new Exception(this.getClass().getName() + ": emitComplete state not implemented");
+            TupleTypeInfo<Tuple2<RowData, Integer>> valueTypeInfo = new TupleTypeInfo<>(recordType, Types.INT);
+            MapStateDescriptor<RowData, Tuple2<RowData, Integer>> recordStateDesc = new MapStateDescriptor<>(stateName,
+                    uniqueKeyType, valueTypeInfo);
+
+            JoinedRowData outRow = new JoinedRowData();
+            outRow.setRowKind(RowKind.INSERT);
+
+            be.applyToAllKeys(VoidNamespace.INSTANCE,
+                VoidNamespaceSerializer.INSTANCE,
+                recordStateDesc,
+                new KeyedStateFunction<RowData, MapState<RowData, Tuple2<RowData, Integer>>>() {
+                    @Override
+                    public void process(RowData key, MapState<RowData, Tuple2<RowData, Integer>> state) throws Exception {
+                        // set current key context for otherView fetch
+                        be.setCurrentKey(key);
+
+                        for (Map.Entry<RowData, Tuple2<RowData, Integer>> entry : state.entries()) {
+                            RowData thisRow = entry.getValue().f0;
+                            Iterable<RowData> records = otherView.getRecords();
+                            int rowsMatched = 0;
+                            for (RowData otherRow: records) {
+                                boolean matched = condition.apply(thisRow, otherRow);
+
+                                if (matched) {
+                                    outRow.replace(thisRow, otherRow);
+                                    collect.collect(outRow);
+                                    rowsMatched++;
+                                }
+                            }
+                            if (rowsMatched == 0) {
+                                outRow.replace(thisRow, otherNullRow);
+                            }
+                        }
+                    }
+                });
         }
     }
 
@@ -229,11 +281,15 @@ public final class OuterJoinRecordStateViews {
 
         // stores record in the mapping <Record, <appear-times, associated-num>>
         private final MapState<RowData, Tuple2<Integer, Integer>> recordState;
+        private final String stateName;
+        private final InternalTypeInfo<RowData> recordType;
+        private final RowData otherNullRow;
 
         private InputSideHasNoUniqueKey(
                 RuntimeContext ctx,
                 String stateName,
                 InternalTypeInfo<RowData> recordType,
+                InternalTypeInfo<RowData> otherRecordType,
                 StateTtlConfig ttlConfig) {
             TupleTypeInfo<Tuple2<Integer, Integer>> tupleTypeInfo = new TupleTypeInfo<>(Types.INT, Types.INT);
             MapStateDescriptor<RowData, Tuple2<Integer, Integer>> recordStateDesc = new MapStateDescriptor<>(stateName,
@@ -242,6 +298,9 @@ public final class OuterJoinRecordStateViews {
                 recordStateDesc.enableTimeToLive(ttlConfig);
             }
             this.recordState = ctx.getMapState(recordStateDesc);
+            this.stateName = stateName;
+            this.recordType = recordType;
+            this.otherNullRow = new GenericRowData(otherRecordType.toRowSize());
         }
 
         @Override
@@ -331,7 +390,41 @@ public final class OuterJoinRecordStateViews {
         @Override
         public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
                 JoinRecordStateView otherView, JoinCondition condition) throws Exception {
-            throw new Exception(this.getClass().getName() + ": emitComplete state not implemented");
+            TupleTypeInfo<Tuple2<Integer, Integer>> tupleTypeInfo = new TupleTypeInfo<>(Types.INT, Types.INT);
+            MapStateDescriptor<RowData, Tuple2<Integer, Integer>> recordStateDesc = new MapStateDescriptor<>(stateName,
+                    recordType, tupleTypeInfo);
+
+            JoinedRowData outRow = new JoinedRowData();
+            outRow.setRowKind(RowKind.INSERT);
+
+            be.applyToAllKeys(VoidNamespace.INSTANCE,
+                VoidNamespaceSerializer.INSTANCE,
+                recordStateDesc,
+                new KeyedStateFunction<RowData, MapState<RowData, Tuple2<Integer, Integer>>>() {
+                    @Override
+                    public void process(RowData key, MapState<RowData, Tuple2<Integer, Integer>> state) throws Exception {
+                        // set current key context for otherView fetch
+                        be.setCurrentKey(key);
+
+                        for (Map.Entry<RowData, Tuple2<Integer, Integer>> entry : state.entries()) {
+                            RowData thisRow = entry.getKey();
+                            Iterable<RowData> records = otherView.getRecords();
+                            int rowsMatched = 0;
+                            for (RowData otherRow: records) {
+                                boolean matched = condition.apply(thisRow, otherRow);
+
+                                if (matched) {
+                                    outRow.replace(thisRow, otherRow);
+                                    collect.collect(outRow);
+                                    rowsMatched++;
+                                }
+                            }
+                            if (rowsMatched == 0) {
+                                outRow.replace(thisRow, otherNullRow);
+                            }
+                        }
+                    }
+                });
         }
     }
 
