@@ -31,6 +31,13 @@ import org.apache.flink.api.java.typeutils.TupleTypeInfo;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.util.IterableIterator;
+import org.apache.flink.util.Collector;
+import org.apache.flink.runtime.state.VoidNamespace;
+import org.apache.flink.runtime.state.VoidNamespaceSerializer;
+import org.apache.flink.runtime.state.KeyedStateBackend;
+import org.apache.flink.runtime.state.KeyedStateFunction;
+import org.apache.flink.table.runtime.generated.JoinCondition;
+import org.apache.flink.types.RowKind;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -40,10 +47,16 @@ import java.util.Map;
 import static org.apache.flink.table.runtime.util.StateConfigUtil.createTtlConfig;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
-/** Utility to create a {@link OuterJoinRecordStateViews} depends on {@link JoinInputSideSpec}. */
+/**
+ * Utility to create a {@link OuterJoinRecordStateViews} depends on
+ * {@link JoinInputSideSpec}.
+ */
 public final class OuterJoinRecordStateViews {
 
-    /** Creates a {@link OuterJoinRecordStateView} depends on {@link JoinInputSideSpec}. */
+    /**
+     * Creates a {@link OuterJoinRecordStateView} depends on
+     * {@link JoinInputSideSpec}.
+     */
     public static OuterJoinRecordStateView create(
             RuntimeContext ctx,
             String stateName,
@@ -83,10 +96,9 @@ public final class OuterJoinRecordStateViews {
                 String stateName,
                 InternalTypeInfo<RowData> recordType,
                 StateTtlConfig ttlConfig) {
-            TupleTypeInfo<Tuple2<RowData, Integer>> valueTypeInfo =
-                    new TupleTypeInfo<>(recordType, Types.INT);
-            ValueStateDescriptor<Tuple2<RowData, Integer>> recordStateDesc =
-                    new ValueStateDescriptor<>(stateName, valueTypeInfo);
+            TupleTypeInfo<Tuple2<RowData, Integer>> valueTypeInfo = new TupleTypeInfo<>(recordType, Types.INT);
+            ValueStateDescriptor<Tuple2<RowData, Integer>> recordStateDesc = new ValueStateDescriptor<>(stateName,
+                    valueTypeInfo);
             if (ttlConfig.isEnabled()) {
                 recordStateDesc.enableTimeToLive(ttlConfig);
             }
@@ -138,6 +150,12 @@ public final class OuterJoinRecordStateViews {
             }
             return reusedTupleList;
         }
+
+        @Override
+        public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
+                JoinRecordStateView otherView, JoinCondition condition) throws Exception {
+            throw new Exception(this.getClass().getName() + ": emitComplete state not implemented");
+        }
     }
 
     private static final class InputSideHasUniqueKey implements OuterJoinRecordStateView {
@@ -155,10 +173,9 @@ public final class OuterJoinRecordStateViews {
                 StateTtlConfig ttlConfig) {
             checkNotNull(uniqueKeyType);
             checkNotNull(uniqueKeySelector);
-            TupleTypeInfo<Tuple2<RowData, Integer>> valueTypeInfo =
-                    new TupleTypeInfo<>(recordType, Types.INT);
-            MapStateDescriptor<RowData, Tuple2<RowData, Integer>> recordStateDesc =
-                    new MapStateDescriptor<>(stateName, uniqueKeyType, valueTypeInfo);
+            TupleTypeInfo<Tuple2<RowData, Integer>> valueTypeInfo = new TupleTypeInfo<>(recordType, Types.INT);
+            MapStateDescriptor<RowData, Tuple2<RowData, Integer>> recordStateDesc = new MapStateDescriptor<>(stateName,
+                    uniqueKeyType, valueTypeInfo);
             if (ttlConfig.isEnabled()) {
                 recordStateDesc.enableTimeToLive(ttlConfig);
             }
@@ -200,6 +217,12 @@ public final class OuterJoinRecordStateViews {
                 throws Exception {
             return recordState.values();
         }
+
+        @Override
+        public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
+                JoinRecordStateView otherView, JoinCondition condition) throws Exception {
+            throw new Exception(this.getClass().getName() + ": emitComplete state not implemented");
+        }
     }
 
     private static final class InputSideHasNoUniqueKey implements OuterJoinRecordStateView {
@@ -212,10 +235,9 @@ public final class OuterJoinRecordStateViews {
                 String stateName,
                 InternalTypeInfo<RowData> recordType,
                 StateTtlConfig ttlConfig) {
-            TupleTypeInfo<Tuple2<Integer, Integer>> tupleTypeInfo =
-                    new TupleTypeInfo<>(Types.INT, Types.INT);
-            MapStateDescriptor<RowData, Tuple2<Integer, Integer>> recordStateDesc =
-                    new MapStateDescriptor<>(stateName, recordType, tupleTypeInfo);
+            TupleTypeInfo<Tuple2<Integer, Integer>> tupleTypeInfo = new TupleTypeInfo<>(Types.INT, Types.INT);
+            MapStateDescriptor<RowData, Tuple2<Integer, Integer>> recordStateDesc = new MapStateDescriptor<>(stateName,
+                    recordType, tupleTypeInfo);
             if (ttlConfig.isEnabled()) {
                 recordStateDesc.enableTimeToLive(ttlConfig);
             }
@@ -275,8 +297,8 @@ public final class OuterJoinRecordStateViews {
                 throws Exception {
             return new IterableIterator<Tuple2<RowData, Integer>>() {
 
-                private final Iterator<Map.Entry<RowData, Tuple2<Integer, Integer>>>
-                        backingIterable = recordState.entries().iterator();
+                private final Iterator<Map.Entry<RowData, Tuple2<Integer, Integer>>> backingIterable = recordState
+                        .entries().iterator();
                 private Tuple2<RowData, Integer> tuple;
                 private int remainingTimes = 0;
 
@@ -304,6 +326,12 @@ public final class OuterJoinRecordStateViews {
                     return this;
                 }
             };
+        }
+
+        @Override
+        public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
+                JoinRecordStateView otherView, JoinCondition condition) throws Exception {
+            throw new Exception(this.getClass().getName() + ": emitComplete state not implemented");
         }
     }
 

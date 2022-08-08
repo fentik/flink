@@ -29,19 +29,37 @@ import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.util.IterableIterator;
+import org.apache.flink.util.Collector;
+import org.apache.flink.runtime.state.VoidNamespace;
+import org.apache.flink.runtime.state.VoidNamespaceSerializer;
+import org.apache.flink.runtime.state.KeyedStateBackend;
+import org.apache.flink.runtime.state.KeyedStateFunction;
+import org.apache.flink.table.runtime.generated.JoinCondition;
+import org.apache.flink.table.data.utils.JoinedRowData;
+import org.apache.flink.types.RowKind;
 
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import static org.apache.flink.table.runtime.util.StateConfigUtil.createTtlConfig;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
-/** Utility to create a {@link JoinRecordStateView} depends on {@link JoinInputSideSpec}. */
+/**
+ * Utility to create a {@link JoinRecordStateView} depends on
+ * {@link JoinInputSideSpec}.
+ */
 public final class JoinRecordStateViews {
 
-    /** Creates a {@link JoinRecordStateView} depends on {@link JoinInputSideSpec}. */
+    private static final Logger LOG = LoggerFactory.getLogger(JoinRecordStateViews.class);
+
+    /**
+     * Creates a {@link JoinRecordStateView} depends on {@link JoinInputSideSpec}.
+     */
     public static JoinRecordStateView create(
             RuntimeContext ctx,
             String stateName,
@@ -78,8 +96,7 @@ public final class JoinRecordStateViews {
                 String stateName,
                 InternalTypeInfo<RowData> recordType,
                 StateTtlConfig ttlConfig) {
-            ValueStateDescriptor<RowData> recordStateDesc =
-                    new ValueStateDescriptor<>(stateName, recordType);
+            ValueStateDescriptor<RowData> recordStateDesc = new ValueStateDescriptor<>(stateName, recordType);
             if (ttlConfig.isEnabled()) {
                 recordStateDesc.enableTimeToLive(ttlConfig);
             }
@@ -107,6 +124,12 @@ public final class JoinRecordStateViews {
             }
             return reusedList;
         }
+
+        @Override
+        public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
+               JoinRecordStateView otherView, JoinCondition condition) throws Exception {
+            throw new Exception(this.getClass().getName() + ": emitComplete state not implemented");
+        }
     }
 
     private static final class InputSideHasUniqueKey implements JoinRecordStateView {
@@ -124,8 +147,8 @@ public final class JoinRecordStateViews {
                 StateTtlConfig ttlConfig) {
             checkNotNull(uniqueKeyType);
             checkNotNull(uniqueKeySelector);
-            MapStateDescriptor<RowData, RowData> recordStateDesc =
-                    new MapStateDescriptor<>(stateName, uniqueKeyType, recordType);
+            MapStateDescriptor<RowData, RowData> recordStateDesc = new MapStateDescriptor<>(stateName, uniqueKeyType,
+                    recordType);
             if (ttlConfig.isEnabled()) {
                 recordStateDesc.enableTimeToLive(ttlConfig);
             }
@@ -149,22 +172,32 @@ public final class JoinRecordStateViews {
         public Iterable<RowData> getRecords() throws Exception {
             return recordState.values();
         }
+
+        @Override
+        public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
+                JoinRecordStateView otherView, JoinCondition condition) throws Exception {
+            throw new Exception(this.getClass().getName() + ": emitComplete state not implemented");
+        }
     }
 
     private static final class InputSideHasNoUniqueKey implements JoinRecordStateView {
 
         private final MapState<RowData, Integer> recordState;
+        private final InternalTypeInfo<RowData> recordType;
+        private final String stateName;
 
         private InputSideHasNoUniqueKey(
                 RuntimeContext ctx,
                 String stateName,
                 InternalTypeInfo<RowData> recordType,
                 StateTtlConfig ttlConfig) {
-            MapStateDescriptor<RowData, Integer> recordStateDesc =
-                    new MapStateDescriptor<>(stateName, recordType, Types.INT);
+            MapStateDescriptor<RowData, Integer> recordStateDesc = new MapStateDescriptor<>(stateName, recordType,
+                    Types.INT);
             if (ttlConfig.isEnabled()) {
                 recordStateDesc.enableTimeToLive(ttlConfig);
             }
+            this.stateName = stateName;
+            this.recordType = recordType;
             this.recordState = ctx.getMapState(recordStateDesc);
         }
 
@@ -196,8 +229,7 @@ public final class JoinRecordStateViews {
         public Iterable<RowData> getRecords() throws Exception {
             return new IterableIterator<RowData>() {
 
-                private final Iterator<Map.Entry<RowData, Integer>> backingIterable =
-                        recordState.entries().iterator();
+                private final Iterator<Map.Entry<RowData, Integer>> backingIterable = recordState.entries().iterator();
                 private RowData record;
                 private int remainingTimes = 0;
 
@@ -225,6 +257,43 @@ public final class JoinRecordStateViews {
                     return this;
                 }
             };
+        }
+
+        @Override
+        public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
+                JoinRecordStateView otherView, JoinCondition condition) throws Exception {
+            MapStateDescriptor<RowData, Integer> recordStateDesc = new MapStateDescriptor<>(stateName, recordType,
+                    Types.INT);
+
+            JoinedRowData outRow = new JoinedRowData();
+            outRow.setRowKind(RowKind.INSERT);
+
+            be.applyToAllKeys(VoidNamespace.INSTANCE,
+                VoidNamespaceSerializer.INSTANCE,
+                recordStateDesc,
+                new KeyedStateFunction<RowData, MapState<RowData, Integer>>() {
+                    @Override
+                    public void process(RowData key, MapState<RowData, Integer> state) throws Exception {
+                        for (Map.Entry<RowData, Integer> entry : state.entries()) {
+                            RowData thisRow = entry.getKey();
+                            Integer numRows = entry.getValue();
+
+                            // set current key context for otherView fetch
+                            be.setCurrentKey(key);
+
+                            Iterable<RowData> records = otherView.getRecords();
+                            for (RowData otherRow : records) {
+                                boolean matched = condition.apply(thisRow, otherRow);
+                                outRow.replace(thisRow, otherRow);
+                                if (matched) {
+                                    for (int i = 0; i < numRows; i++) {
+                                        collect.collect(outRow);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
         }
     }
 }
