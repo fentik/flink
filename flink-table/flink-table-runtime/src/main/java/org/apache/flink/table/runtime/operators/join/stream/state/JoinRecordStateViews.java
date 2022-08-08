@@ -137,6 +137,9 @@ public final class JoinRecordStateViews {
         // stores record in the mapping <UK, Record>
         private final MapState<RowData, RowData> recordState;
         private final KeySelector<RowData, RowData> uniqueKeySelector;
+        private final String stateName;
+        private final InternalTypeInfo<RowData> uniqueKeyType;
+        private final InternalTypeInfo<RowData> recordType;
 
         private InputSideHasUniqueKey(
                 RuntimeContext ctx,
@@ -154,6 +157,9 @@ public final class JoinRecordStateViews {
             }
             this.recordState = ctx.getMapState(recordStateDesc);
             this.uniqueKeySelector = uniqueKeySelector;
+            this.stateName = stateName;
+            this.uniqueKeyType = uniqueKeyType;
+            this.recordType = recordType;
         }
 
         @Override
@@ -176,7 +182,35 @@ public final class JoinRecordStateViews {
         @Override
         public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
                 JoinRecordStateView otherView, JoinCondition condition) throws Exception {
-            throw new Exception(this.getClass().getName() + ": emitComplete state not implemented");
+            MapStateDescriptor<RowData, RowData> recordStateDesc = new MapStateDescriptor<>(stateName, uniqueKeyType,
+                    recordType);
+
+            JoinedRowData outRow = new JoinedRowData();
+            outRow.setRowKind(RowKind.INSERT);
+
+            be.applyToAllKeys(VoidNamespace.INSTANCE,
+                VoidNamespaceSerializer.INSTANCE,
+                recordStateDesc,
+                new KeyedStateFunction<RowData, MapState<RowData, RowData>>() {
+                    @Override
+                    public void process(RowData key, MapState<RowData, RowData> state) throws Exception {
+                        for (Map.Entry<RowData, RowData> entry : state.entries()) {
+                            RowData thisRow = entry.getValue();
+
+                            // set current key context for otherView fetch
+                            be.setCurrentKey(key);
+
+                            Iterable<RowData> records = otherView.getRecords();
+                            for (RowData otherRow : records) {
+                                boolean matched = condition.apply(thisRow, otherRow);
+                                outRow.replace(thisRow, otherRow);
+                                if (matched) {
+                                    collect.collect(outRow);
+                                }
+                            }
+                        }
+                    }
+                });
         }
     }
 
