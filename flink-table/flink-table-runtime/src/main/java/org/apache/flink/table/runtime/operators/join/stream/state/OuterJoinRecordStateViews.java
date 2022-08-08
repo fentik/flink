@@ -75,7 +75,7 @@ public final class OuterJoinRecordStateViews {
         if (inputSideSpec.hasUniqueKey()) {
             if (inputSideSpec.joinKeyContainsUniqueKey()) {
                 return new OuterJoinRecordStateViews.JoinKeyContainsUniqueKey(
-                        ctx, stateName, recordType, ttlConfig);
+                        ctx, stateName, recordType, otherRecordType, ttlConfig);
             } else {
                 return new OuterJoinRecordStateViews.InputSideHasUniqueKey(
                         ctx,
@@ -99,11 +99,15 @@ public final class OuterJoinRecordStateViews {
         private final ValueState<Tuple2<RowData, Integer>> recordState;
         private final List<RowData> reusedRecordList;
         private final List<Tuple2<RowData, Integer>> reusedTupleList;
+        private final String stateName;
+        private final InternalTypeInfo<RowData> recordType;
+        private final GenericRowData otherNullRow;
 
         private JoinKeyContainsUniqueKey(
                 RuntimeContext ctx,
                 String stateName,
                 InternalTypeInfo<RowData> recordType,
+                InternalTypeInfo<RowData> otherRecordType,
                 StateTtlConfig ttlConfig) {
             TupleTypeInfo<Tuple2<RowData, Integer>> valueTypeInfo = new TupleTypeInfo<>(recordType, Types.INT);
             ValueStateDescriptor<Tuple2<RowData, Integer>> recordStateDesc = new ValueStateDescriptor<>(stateName,
@@ -115,6 +119,9 @@ public final class OuterJoinRecordStateViews {
             // the result records always not more than 1
             this.reusedRecordList = new ArrayList<>(1);
             this.reusedTupleList = new ArrayList<>(1);
+            this.stateName = stateName;
+            this.recordType = recordType;
+            this.otherNullRow = new GenericRowData(otherRecordType.toRowSize());
         }
 
         @Override
@@ -163,7 +170,38 @@ public final class OuterJoinRecordStateViews {
         @Override
         public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
                 JoinRecordStateView otherView, JoinCondition condition) throws Exception {
-            throw new Exception(this.getClass().getName() + ": emitComplete state not implemented");
+            ValueStateDescriptor<RowData> recordStateDesc = new ValueStateDescriptor<>(stateName, recordType);
+
+            JoinedRowData outRow = new JoinedRowData();
+            outRow.setRowKind(RowKind.INSERT);
+
+            be.applyToAllKeys(VoidNamespace.INSTANCE,
+                VoidNamespaceSerializer.INSTANCE,
+                recordStateDesc,
+                new KeyedStateFunction<RowData, ValueState<RowData>>() {
+                    @Override
+                    public void process(RowData key, ValueState<RowData> state) throws Exception {
+                        RowData thisRow = state.value();
+
+                        // set current key context for otherView fetch
+                        be.setCurrentKey(key);
+
+                        int rowsMatched = 0;
+                        Iterable<RowData> records = otherView.getRecords();
+                        for (RowData otherRow : records) {
+                            boolean matched = condition.apply(thisRow, otherRow);
+                            outRow.replace(thisRow, otherRow);
+                            if (matched) {
+                                collect.collect(outRow);
+                                rowsMatched++;
+                            }
+                        }
+
+                        if (rowsMatched == 0) {
+                            outRow.replace(thisRow, otherNullRow);
+                        }
+                    }
+                });
         }
     }
 
