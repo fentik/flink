@@ -199,6 +199,7 @@ public final class OuterJoinRecordStateViews {
 
                         if (rowsMatched == 0) {
                             outRow.replace(thisRow, otherNullRow);
+                            collect.collect(outRow);
                         }
                     }
                 });
@@ -308,6 +309,7 @@ public final class OuterJoinRecordStateViews {
                             }
                             if (rowsMatched == 0) {
                                 outRow.replace(thisRow, otherNullRow);
+                                collect.collect(outRow);
                             }
                         }
                     }
@@ -459,6 +461,7 @@ public final class OuterJoinRecordStateViews {
                             }
                             if (rowsMatched == 0) {
                                 outRow.replace(thisRow, otherNullRow);
+                                collect.collect(outRow);
                             }
                         }
                     }
