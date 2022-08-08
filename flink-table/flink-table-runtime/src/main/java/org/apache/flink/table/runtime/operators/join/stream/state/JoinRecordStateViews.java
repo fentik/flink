@@ -90,6 +90,8 @@ public final class JoinRecordStateViews {
 
         private final ValueState<RowData> recordState;
         private final List<RowData> reusedList;
+        private final String stateName;
+        private final InternalTypeInfo<RowData> recordType;
 
         private JoinKeyContainsUniqueKey(
                 RuntimeContext ctx,
@@ -103,6 +105,8 @@ public final class JoinRecordStateViews {
             this.recordState = ctx.getState(recordStateDesc);
             // the result records always not more than 1
             this.reusedList = new ArrayList<>(1);
+            this.stateName = stateName;
+            this.recordType = recordType;
         }
 
         @Override
@@ -127,8 +131,33 @@ public final class JoinRecordStateViews {
 
         @Override
         public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-               JoinRecordStateView otherView, JoinCondition condition) throws Exception {
-            throw new Exception(this.getClass().getName() + ": emitComplete state not implemented");
+                JoinRecordStateView otherView, JoinCondition condition) throws Exception {
+            ValueStateDescriptor<RowData> recordStateDesc = new ValueStateDescriptor<>(stateName, recordType);
+
+            JoinedRowData outRow = new JoinedRowData();
+            outRow.setRowKind(RowKind.INSERT);
+
+            be.applyToAllKeys(VoidNamespace.INSTANCE,
+                VoidNamespaceSerializer.INSTANCE,
+                recordStateDesc,
+                new KeyedStateFunction<RowData, ValueState<RowData>>() {
+                    @Override
+                    public void process(RowData key, ValueState<RowData> state) throws Exception {
+                        RowData thisRow = state.value();
+
+                        // set current key context for otherView fetch
+                        be.setCurrentKey(key);
+
+                        Iterable<RowData> records = otherView.getRecords();
+                        for (RowData otherRow : records) {
+                            boolean matched = condition.apply(thisRow, otherRow);
+                            outRow.replace(thisRow, otherRow);
+                            if (matched) {
+                                collect.collect(outRow);
+                            }
+                        }
+                    }
+                });
         }
     }
 
