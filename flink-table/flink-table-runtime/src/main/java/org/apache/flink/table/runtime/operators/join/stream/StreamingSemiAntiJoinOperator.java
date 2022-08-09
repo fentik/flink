@@ -75,6 +75,7 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
                         LEFT_RECORDS_STATE_NAME,
                         leftInputSideSpec,
                         leftType,
+                        rightType,
                         stateRetentionTime);
 
         this.rightRecordStateView =

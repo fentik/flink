@@ -50,7 +50,8 @@ public class RetractableTopNFunctionTest extends TopNFunctionTestBase {
                 rankRange,
                 generatedEqualiser,
                 generateUpdateBefore,
-                outputRankNumber);
+                outputRankNumber,
+                -1L /* backfilleWatermark */ );
     }
 
     @Test
