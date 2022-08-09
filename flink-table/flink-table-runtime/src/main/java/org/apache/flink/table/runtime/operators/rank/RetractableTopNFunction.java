@@ -211,10 +211,9 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
          * ... Map<ORDER BY clause, List<matching INPUT ROWS>>
          */
         ValueStateDescriptor<SortedMap<RowData, Long>> smValueStateDescriptor = new ValueStateDescriptor<>(
-            "sorted-map",
-            new SortedMapTypeInfo<>(
-                sortKeyType, BasicTypeInfo.LONG_TYPE_INFO, serializableComparator));
-
+                "sorted-map",
+                new SortedMapTypeInfo<>(
+                        sortKeyType, BasicTypeInfo.LONG_TYPE_INFO, serializableComparator));
 
         be.applyToAllKeys(VoidNamespace.INSTANCE,
                 VoidNamespaceSerializer.INSTANCE,
@@ -252,7 +251,7 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
                         }
                     }
                 });
- 
+
         LOG.info("{} transitioned to Stream mode and emitted {} records", getPrintableName(),
                 counter.count);
 
@@ -267,6 +266,7 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
         if (sortedMap == null) {
             sortedMap = new TreeMap<>(sortKeyComparator);
         }
+
         RowData sortKey = sortKeySelector.getKey(input);
         boolean isAccumulate = RowDataUtil.isAccumulateMsg(input);
         input.setRowKind(RowKind.INSERT); // erase row kind for further state accessing
@@ -321,8 +321,9 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
                         throw new RuntimeException(STATE_CLEARED_WARN_MSG);
                     }
                 } else {
-                    throw new RuntimeException(
-                            "Can not retract a non-existent record. This should never happen.");
+                    LOG.warn("Attempt to retract non-existed record {}", inputRowSerializer.asString(input));
+                    // throw new RuntimeException(
+                    // "Can not retract a non-existent record. This should never happen.");
                 }
             }
 
@@ -349,8 +350,6 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
         }
         treeMap.update(sortedMap);
     }
-
-
 
     // ------------- ROW_NUMBER-------------------------------
 
@@ -472,7 +471,8 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
      * with row_number.
      *
      * While we can simly short circuit the emitRecords* methods while not in stream
-     * mode, the retract* methods modify the state, so we need to have more fine grained
+     * mode, the retract* methods modify the state, so we need to have more fine
+     * grained
      * handling of supressing collect calls.
      *
      * @return true if the input record has been removed from {@link #dataState}.
