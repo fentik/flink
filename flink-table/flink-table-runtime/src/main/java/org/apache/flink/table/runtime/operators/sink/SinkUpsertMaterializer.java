@@ -193,14 +193,16 @@ public class SinkUpsertMaterializer extends TableStreamOperator<RowData>
             values = new ArrayList<>(2);
         }
         int size = -1;
-        String key = row.getString(0).toString();  // Assumes the first column in a string.
+        String key;
         if (row instanceof BinaryRowData) {
             size = ((BinaryRowData)row).getSizeInBytes();
         }
         if (values.size() > 10 || size > 1024*1024) {
+            key = row.getString(0).toString();  // Assumes the first column in a string.
             LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: EXPENSIVE update to state value with key " + key + " to values {num entries: " + values.size() + "} with a row of size " + size);
         }
         if (this.shouldLogInput()) {
+            key = row.getString(0).toString();  // Assumes the first column in a string.
             if (this.physicalRowType != null) {
                 LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with key " + key + "(" + size + ")" + " to values {num entries: " + values.size() + "} : " +
                 this.rowToString(this.physicalRowType, row));
@@ -221,7 +223,6 @@ public class SinkUpsertMaterializer extends TableStreamOperator<RowData>
                 final int lastIndex = values.size() - 1;
                 final int index = removeFirst(values, row);
                 if (index == -1) {
-                    LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: WARNING: Did not find a value for " + key + ".We may have truncated the values too early.");
                     LOG.info(STATE_CLEARED_WARN_MSG);
                     return;
                 }
@@ -241,18 +242,7 @@ public class SinkUpsertMaterializer extends TableStreamOperator<RowData>
         if (values.isEmpty()) {
             state.clear();
         } else {
-            // We assume we are not going to get out-of-order entries for more than 20.
-            if (value.size() > 50) {
-                LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Removing 30 entries for " + key + " currently with " + values.size() + " values. Hopefully, this doesn't cause issues.");
-                removeN(values, 30);
-            }
             state.update(values);
-        }
-    }
-
-    private void removeN(List<RowData> values, int count) {
-        for(int i = 0; i < count; i++) {
-            values.remove(0);
         }
     }
 
