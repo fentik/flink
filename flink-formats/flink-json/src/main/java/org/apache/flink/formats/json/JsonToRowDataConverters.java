@@ -43,6 +43,8 @@ import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.Arra
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.TextNode;
 
+import org.apache.commons.lang3.math.NumberUtils;
+
 import java.io.IOException;
 import java.io.Serializable;
 import java.lang.reflect.Array;
@@ -234,9 +236,7 @@ public class JsonToRowDataConverters implements Serializable {
         switch (timestampFormat) {
             case SQL:
                 String text = jsonNode.asText();
-                try {
-                    parsedTimestamp = SQL_TIMESTAMP_FORMAT.parse(text);
-                } catch (DateTimeParseException e) {
+                if (NumberUtils.isNumber(text)) {
                     // Debezium formats temporal types as numbers:
                     // https://debezium.io/documentation/reference/stable/connectors/postgresql.html#postgresql-temporal-values
                     long epochMicros = new BigInteger(text).longValue();
@@ -253,6 +253,8 @@ public class JsonToRowDataConverters implements Serializable {
                     Instant instant = Instant.ofEpochMilli(epochMicros / 1000);
                     LocalDateTime dateTime = LocalDateTime.ofInstant(instant, ZoneOffset.UTC);
                     return TimestampData.fromLocalDateTime(dateTime);
+                } else {
+                    parsedTimestamp = SQL_TIMESTAMP_FORMAT.parse(text);
                 }
                 break;
             case ISO_8601:

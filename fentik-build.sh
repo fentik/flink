@@ -25,3 +25,12 @@ aws s3 cp s3://dev-dataflo/ops/ec2/flink-lib/hive-exec-3.1.2.jar $LIB_DIR
 
 mkdir -p $FLINK_DIR/plugins/s3-fs-presto
 cp ./flink-filesystems/flink-s3-fs-presto/target/flink-s3-fs-presto-1.15.0.jar $FLINK_DIR/plugins/s3-fs-presto/
+
+# Build a Flink binary.
+echo "Building Flink binary at /opt/flink-1.15.0-rc1.tar.gz"
+rm -f /opt/flink-1.15.0-rc1/log/rocksdb/* /opt/flink-1.15.0-rc1/log/*
+pushd /opt
+rm -f flink-1.15.0-rc1.tar.gz
+tar zcfh flink-1.15.0-rc1.tar.gz flink-1.15.0-rc1
+popd
+
