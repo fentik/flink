@@ -52,6 +52,7 @@ public enum RocksDBProperty {
     EstimatePendingCompactionBytes("estimate-pending-compaction-bytes"),
     NumRunningCompactions("num-running-compactions"),
     NumRunningFlushes("num-running-flushes"),
+    NumCompletedFlushes("num-immutable-mem-table-flushed"),
     ActualDelayedWriteRate("actual-delayed-write-rate"),
     IsWriteStopped("is-write-stopped"),
     BlockCacheCapacity("block-cache-capacity"),
