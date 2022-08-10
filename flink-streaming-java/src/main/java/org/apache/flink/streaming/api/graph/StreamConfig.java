@@ -55,15 +55,13 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
-import java.util.Optional;
 
 import static org.apache.flink.util.Preconditions.checkArgument;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 import static org.apache.flink.util.Preconditions.checkState;
 
 /**
- * Internal configuration for a {@link StreamOperator}. This is created and
- * populated by the {@link
+ * Internal configuration for a {@link StreamOperator}. This is created and populated by the {@link
  * StreamingJobGraphGenerator}.
  */
 @Internal
@@ -72,11 +70,10 @@ public class StreamConfig implements Serializable {
     private static final long serialVersionUID = 1L;
 
     // ------------------------------------------------------------------------
-    // Config Keys
+    //  Config Keys
     // ------------------------------------------------------------------------
 
-    @VisibleForTesting
-    public static final String SERIALIZEDUDF = "serializedUDF";
+    @VisibleForTesting public static final String SERIALIZEDUDF = "serializedUDF";
 
     private static final String NUMBER_OF_OUTPUTS = "numberOfOutputs";
     private static final String NUMBER_OF_NETWORK_INPUTS = "numberOfNetworkInputs";
@@ -113,30 +110,24 @@ public class StreamConfig implements Serializable {
     private static final String TIME_CHARACTERISTIC = "timechar";
 
     private static final String MANAGED_MEMORY_FRACTION_PREFIX = "managedMemFraction.";
-    private static final ConfigOption<Boolean> STATE_BACKEND_USE_MANAGED_MEMORY = ConfigOptions
-            .key("statebackend.useManagedMemory")
-            .booleanType()
-            .noDefaultValue()
-            .withDescription(
-                    "If state backend is specified, whether it uses managed memory.");
-
-    public static final ConfigOption<Integer> DATA_STREAM_SOURCE_PARALLELISM = ConfigOptions.key(
-            "execution.data-source-parallelism")
-            .intType()
-            .noDefaultValue()
-            .withDescription("Override default job parallelism with this value for source reads. Used to "
-                    + "match Kafka partition parallelism to enable watermaks to work correctly.");
+    private static final ConfigOption<Boolean> STATE_BACKEND_USE_MANAGED_MEMORY =
+            ConfigOptions.key("statebackend.useManagedMemory")
+                    .booleanType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "If state backend is specified, whether it uses managed memory.");
 
     // ------------------------------------------------------------------------
-    // Default Values
+    //  Default Values
     // ------------------------------------------------------------------------
 
-    private static final CheckpointingMode DEFAULT_CHECKPOINTING_MODE = CheckpointingMode.EXACTLY_ONCE;
+    private static final CheckpointingMode DEFAULT_CHECKPOINTING_MODE =
+            CheckpointingMode.EXACTLY_ONCE;
 
     private static final double DEFAULT_MANAGED_MEMORY_FRACTION = 0.0;
 
     // ------------------------------------------------------------------------
-    // Config
+    //  Config
     // ------------------------------------------------------------------------
 
     private final Configuration config;
@@ -150,7 +141,7 @@ public class StreamConfig implements Serializable {
     }
 
     // ------------------------------------------------------------------------
-    // Configured Properties
+    //  Configured Properties
     // ------------------------------------------------------------------------
 
     public void setVertexID(Integer vertexID) {
@@ -161,17 +152,11 @@ public class StreamConfig implements Serializable {
         return config.getInteger(VERTEX_NAME, -1);
     }
 
-    public Optional<Integer> getStreamSourceParallelism() {
-        return config.getOptional(DATA_STREAM_SOURCE_PARALLELISM);
-    }
-
-    /**
-     * Fraction of managed memory reserved for the given use case that this operator
-     * should use.
-     */
+    /** Fraction of managed memory reserved for the given use case that this operator should use. */
     public void setManagedMemoryFractionOperatorOfUseCase(
             ManagedMemoryUseCase managedMemoryUseCase, double fraction) {
-        final ConfigOption<Double> configOption = getManagedMemoryFractionConfigOption(managedMemoryUseCase);
+        final ConfigOption<Double> configOption =
+                getManagedMemoryFractionConfigOption(managedMemoryUseCase);
 
         checkArgument(
                 fraction >= 0.0 && fraction <= 1.0,
@@ -183,8 +168,7 @@ public class StreamConfig implements Serializable {
     }
 
     /**
-     * Fraction of total managed memory in the slot that this operator should use
-     * for the given use
+     * Fraction of total managed memory in the slot that this operator should use for the given use
      * case.
      */
     public double getManagedMemoryFractionOperatorUseCaseOfSlot(
@@ -203,7 +187,7 @@ public class StreamConfig implements Serializable {
     private static ConfigOption<Double> getManagedMemoryFractionConfigOption(
             ManagedMemoryUseCase managedMemoryUseCase) {
         return ConfigOptions.key(
-                MANAGED_MEMORY_FRACTION_PREFIX + checkNotNull(managedMemoryUseCase))
+                        MANAGED_MEMORY_FRACTION_PREFIX + checkNotNull(managedMemoryUseCase))
                 .doubleType()
                 .defaultValue(DEFAULT_MANAGED_MEMORY_FRACTION);
     }
@@ -212,8 +196,9 @@ public class StreamConfig implements Serializable {
         return config.keySet().stream()
                 .filter((key) -> key.startsWith(MANAGED_MEMORY_FRACTION_PREFIX))
                 .map(
-                        (key) -> ManagedMemoryUseCase.valueOf(
-                                key.replaceFirst(MANAGED_MEMORY_FRACTION_PREFIX, "")))
+                        (key) ->
+                                ManagedMemoryUseCase.valueOf(
+                                        key.replaceFirst(MANAGED_MEMORY_FRACTION_PREFIX, "")))
                 .collect(Collectors.toSet());
     }
 
@@ -341,13 +326,14 @@ public class StreamConfig implements Serializable {
             String classLoaderInfo = ClassLoaderUtil.getUserCodeClassLoaderInfo(cl);
             boolean loadableDoubleCheck = ClassLoaderUtil.validateClassLoadable(e, cl);
 
-            String exceptionMessage = "Cannot load user class: "
-                    + e.getMessage()
-                    + "\nClassLoader info: "
-                    + classLoaderInfo
-                    + (loadableDoubleCheck
-                            ? "\nClass was actually found in classloader - deserialization issue."
-                            : "\nClass not resolvable through given classloader.");
+            String exceptionMessage =
+                    "Cannot load user class: "
+                            + e.getMessage()
+                            + "\nClassLoader info: "
+                            + classLoaderInfo
+                            + (loadableDoubleCheck
+                                    ? "\nClass was actually found in classloader - deserialization issue."
+                                    : "\nClass not resolvable through given classloader.");
 
             throw new StreamTaskException(exceptionMessage, e);
         } catch (Exception e) {
@@ -397,8 +383,8 @@ public class StreamConfig implements Serializable {
 
     public List<StreamEdge> getNonChainedOutputs(ClassLoader cl) {
         try {
-            List<StreamEdge> nonChainedOutputs = InstantiationUtil.readObjectFromConfig(this.config, NONCHAINED_OUTPUTS,
-                    cl);
+            List<StreamEdge> nonChainedOutputs =
+                    InstantiationUtil.readObjectFromConfig(this.config, NONCHAINED_OUTPUTS, cl);
             return nonChainedOutputs == null ? new ArrayList<StreamEdge>() : nonChainedOutputs;
         } catch (Exception e) {
             throw new StreamTaskException("Could not instantiate non chained outputs.", e);
@@ -415,7 +401,8 @@ public class StreamConfig implements Serializable {
 
     public List<StreamEdge> getChainedOutputs(ClassLoader cl) {
         try {
-            List<StreamEdge> chainedOutputs = InstantiationUtil.readObjectFromConfig(this.config, CHAINED_OUTPUTS, cl);
+            List<StreamEdge> chainedOutputs =
+                    InstantiationUtil.readObjectFromConfig(this.config, CHAINED_OUTPUTS, cl);
             return chainedOutputs == null ? new ArrayList<StreamEdge>() : chainedOutputs;
         } catch (Exception e) {
             throw new StreamTaskException("Could not instantiate chained outputs.", e);
@@ -432,7 +419,8 @@ public class StreamConfig implements Serializable {
 
     public List<StreamEdge> getInPhysicalEdges(ClassLoader cl) {
         try {
-            List<StreamEdge> inEdges = InstantiationUtil.readObjectFromConfig(this.config, IN_STREAM_EDGES, cl);
+            List<StreamEdge> inEdges =
+                    InstantiationUtil.readObjectFromConfig(this.config, IN_STREAM_EDGES, cl);
             return inEdges == null ? new ArrayList<StreamEdge>() : inEdges;
         } catch (Exception e) {
             throw new StreamTaskException("Could not instantiate inputs.", e);
@@ -493,7 +481,8 @@ public class StreamConfig implements Serializable {
 
     public List<StreamEdge> getOutEdgesInOrder(ClassLoader cl) {
         try {
-            List<StreamEdge> outEdgesInOrder = InstantiationUtil.readObjectFromConfig(this.config, EDGES_IN_ORDER, cl);
+            List<StreamEdge> outEdgesInOrder =
+                    InstantiationUtil.readObjectFromConfig(this.config, EDGES_IN_ORDER, cl);
             return outEdgesInOrder == null ? new ArrayList<StreamEdge>() : outEdgesInOrder;
         } catch (Exception e) {
             throw new StreamTaskException("Could not instantiate outputs in order.", e);
@@ -512,8 +501,8 @@ public class StreamConfig implements Serializable {
 
     public Map<Integer, StreamConfig> getTransitiveChainedTaskConfigs(ClassLoader cl) {
         try {
-            Map<Integer, StreamConfig> confs = InstantiationUtil.readObjectFromConfig(this.config, CHAINED_TASK_CONFIG,
-                    cl);
+            Map<Integer, StreamConfig> confs =
+                    InstantiationUtil.readObjectFromConfig(this.config, CHAINED_TASK_CONFIG, cl);
             return confs == null ? new HashMap<Integer, StreamConfig>() : confs;
         } catch (Exception e) {
             throw new StreamTaskException("Could not instantiate configuration.", e);
@@ -521,8 +510,7 @@ public class StreamConfig implements Serializable {
     }
 
     public Map<Integer, StreamConfig> getTransitiveChainedTaskConfigsWithSelf(ClassLoader cl) {
-        // TODO: could this logic be moved to the user of
-        // #setTransitiveChainedTaskConfigs() ?
+        // TODO: could this logic be moved to the user of #setTransitiveChainedTaskConfigs() ?
         Map<Integer, StreamConfig> chainedTaskConfigs = getTransitiveChainedTaskConfigs(cl);
         chainedTaskConfigs.put(getVertexID(), this);
         return chainedTaskConfigs;
@@ -554,7 +542,7 @@ public class StreamConfig implements Serializable {
     }
 
     // ------------------------------------------------------------------------
-    // State backend
+    //  State backend
     // ------------------------------------------------------------------------
 
     public void setStateBackend(StateBackend backend) {
@@ -693,7 +681,7 @@ public class StreamConfig implements Serializable {
     }
 
     // ------------------------------------------------------------------------
-    // Miscellaneous
+    //  Miscellaneous
     // ------------------------------------------------------------------------
 
     public void setChainStart() {
@@ -757,39 +745,30 @@ public class StreamConfig implements Serializable {
     }
 
     /**
-     * Requirements of the different inputs of an operator. Each input can have a
-     * different
-     * requirement. For all {@link #SORTED} inputs, records are sorted/grouped by
-     * key and all
-     * records of a given key are passed to the operator consecutively before moving
-     * on to the next
+     * Requirements of the different inputs of an operator. Each input can have a different
+     * requirement. For all {@link #SORTED} inputs, records are sorted/grouped by key and all
+     * records of a given key are passed to the operator consecutively before moving on to the next
      * group.
      */
     public enum InputRequirement {
         /**
-         * Records from all sorted inputs are grouped (sorted) by key and are then fed
-         * to the
-         * operator one group at a time. This "zig-zags" between different inputs if
-         * records for the
-         * same key arrive on multiple inputs to ensure that the operator sees all
-         * records with a
+         * Records from all sorted inputs are grouped (sorted) by key and are then fed to the
+         * operator one group at a time. This "zig-zags" between different inputs if records for the
+         * same key arrive on multiple inputs to ensure that the operator sees all records with a
          * key as one consecutive group.
          */
         SORTED,
 
         /**
-         * Records from {@link #PASS_THROUGH} inputs are passed to the operator before
-         * passing any
-         * records from {@link #SORTED} inputs. There are no guarantees on ordering
-         * between and
+         * Records from {@link #PASS_THROUGH} inputs are passed to the operator before passing any
+         * records from {@link #SORTED} inputs. There are no guarantees on ordering between and
          * within the different {@link #PASS_THROUGH} inputs.
          */
         PASS_THROUGH;
     }
 
     /** Interface representing chained inputs. */
-    public interface InputConfig extends Serializable {
-    }
+    public interface InputConfig extends Serializable {}
 
     /** A representation of a Network {@link InputConfig}. */
     public static class NetworkInputConfig implements InputConfig {
@@ -861,7 +840,7 @@ public class StreamConfig implements Serializable {
 
     public static boolean requiresSorting(StreamConfig.InputConfig inputConfig) {
         return inputConfig instanceof StreamConfig.NetworkInputConfig
-                && ((StreamConfig.NetworkInputConfig) inputConfig)
-                        .getInputRequirement() == StreamConfig.InputRequirement.SORTED;
+                && ((StreamConfig.NetworkInputConfig) inputConfig).getInputRequirement()
+                        == StreamConfig.InputRequirement.SORTED;
     }
 }

@@ -110,8 +110,7 @@ public class KafkaDynamicTableFactoryTest {
     private static final String TOPIC = "myTopic";
     private static final String TOPICS = "myTopic-1;myTopic-2;myTopic-3";
     private static final String TOPIC_REGEX = "myTopic-\\d+";
-    private static final List<String> TOPIC_LIST =
-            Arrays.asList("myTopic-1", "myTopic-2", "myTopic-3");
+    private static final List<String> TOPIC_LIST = Arrays.asList("myTopic-1", "myTopic-2", "myTopic-3");
     private static final String TEST_REGISTRY_URL = "http://localhost:8081";
     private static final String DEFAULT_VALUE_SUBJECT = TOPIC + "-value";
     private static final String DEFAULT_KEY_SUBJECT = TOPIC + "-key";
@@ -153,38 +152,35 @@ public class KafkaDynamicTableFactoryTest {
         KAFKA_FINAL_SOURCE_PROPERTIES.putAll(KAFKA_SOURCE_PROPERTIES);
     }
 
-    private static final String PROPS_SCAN_OFFSETS =
-            String.format(
-                    "partition:%d,offset:%d;partition:%d,offset:%d",
-                    PARTITION_0, OFFSET_0, PARTITION_1, OFFSET_1);
+    private static final String PROPS_SCAN_OFFSETS = String.format(
+            "partition:%d,offset:%d;partition:%d,offset:%d",
+            PARTITION_0, OFFSET_0, PARTITION_1, OFFSET_1);
 
-    private static final ResolvedSchema SCHEMA =
-            new ResolvedSchema(
-                    Arrays.asList(
-                            Column.physical(NAME, DataTypes.STRING().notNull()),
-                            Column.physical(COUNT, DataTypes.DECIMAL(38, 18)),
-                            Column.physical(TIME, DataTypes.TIMESTAMP(3)),
-                            Column.computed(
-                                    COMPUTED_COLUMN_NAME,
-                                    ResolvedExpressionMock.of(
-                                            COMPUTED_COLUMN_DATATYPE, COMPUTED_COLUMN_EXPRESSION))),
-                    Collections.singletonList(
-                            WatermarkSpec.of(
-                                    TIME,
-                                    ResolvedExpressionMock.of(
-                                            WATERMARK_DATATYPE, WATERMARK_EXPRESSION))),
-                    null);
+    private static final ResolvedSchema SCHEMA = new ResolvedSchema(
+            Arrays.asList(
+                    Column.physical(NAME, DataTypes.STRING().notNull()),
+                    Column.physical(COUNT, DataTypes.DECIMAL(38, 18)),
+                    Column.physical(TIME, DataTypes.TIMESTAMP(3)),
+                    Column.computed(
+                            COMPUTED_COLUMN_NAME,
+                            ResolvedExpressionMock.of(
+                                    COMPUTED_COLUMN_DATATYPE, COMPUTED_COLUMN_EXPRESSION))),
+            Collections.singletonList(
+                    WatermarkSpec.of(
+                            TIME,
+                            ResolvedExpressionMock.of(
+                                    WATERMARK_DATATYPE, WATERMARK_EXPRESSION))),
+            null);
 
-    private static final ResolvedSchema SCHEMA_WITH_METADATA =
-            new ResolvedSchema(
-                    Arrays.asList(
-                            Column.physical(NAME, DataTypes.STRING()),
-                            Column.physical(COUNT, DataTypes.DECIMAL(38, 18)),
-                            Column.metadata(TIME, DataTypes.TIMESTAMP(3), "timestamp", false),
-                            Column.metadata(
-                                    METADATA, DataTypes.STRING(), "value.metadata_2", false)),
-                    Collections.emptyList(),
-                    null);
+    private static final ResolvedSchema SCHEMA_WITH_METADATA = new ResolvedSchema(
+            Arrays.asList(
+                    Column.physical(NAME, DataTypes.STRING()),
+                    Column.physical(COUNT, DataTypes.DECIMAL(38, 18)),
+                    Column.metadata(TIME, DataTypes.TIMESTAMP(3), "timestamp", false),
+                    Column.metadata(
+                            METADATA, DataTypes.STRING(), "value.metadata_2", false)),
+            Collections.emptyList(),
+            null);
 
     private static final DataType SCHEMA_DATA_TYPE = SCHEMA.toPhysicalRowDataType();
 
@@ -197,71 +193,66 @@ public class KafkaDynamicTableFactoryTest {
         specificOffsets.put(new KafkaTopicPartition(TOPIC, PARTITION_0), OFFSET_0);
         specificOffsets.put(new KafkaTopicPartition(TOPIC, PARTITION_1), OFFSET_1);
 
-        final DecodingFormat<DeserializationSchema<RowData>> valueDecodingFormat =
-                new DecodingFormatMock(",", true);
+        final DecodingFormat<DeserializationSchema<RowData>> valueDecodingFormat = new DecodingFormatMock(",", true);
 
         // Test scan source equals
-        final KafkaDynamicSource expectedKafkaSource =
-                createExpectedScanSource(
-                        SCHEMA_DATA_TYPE,
-                        null,
-                        valueDecodingFormat,
-                        new int[0],
-                        new int[] {0, 1, 2},
-                        null,
-                        Collections.singletonList(TOPIC),
-                        null,
-                        KAFKA_SOURCE_PROPERTIES,
-                        StartupMode.SPECIFIC_OFFSETS,
-                        specificOffsets,
-                        0);
+        final KafkaDynamicSource expectedKafkaSource = createExpectedScanSource(
+                SCHEMA_DATA_TYPE,
+                null,
+                valueDecodingFormat,
+                new int[0],
+                new int[] { 0, 1, 2 },
+                null,
+                Collections.singletonList(TOPIC),
+                null,
+                KAFKA_SOURCE_PROPERTIES,
+                StartupMode.SPECIFIC_OFFSETS,
+                specificOffsets,
+                0);
         assertThat(actualKafkaSource).isEqualTo(expectedKafkaSource);
 
-        ScanTableSource.ScanRuntimeProvider provider =
-                actualKafkaSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
+        ScanTableSource.ScanRuntimeProvider provider = actualKafkaSource
+                .getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
         assertKafkaSource(provider);
     }
 
     @Test
     public void testTableSourceWithPattern() {
-        final Map<String, String> modifiedOptions =
-                getModifiedOptions(
-                        getBasicSourceOptions(),
-                        options -> {
-                            options.remove("topic");
-                            options.put("topic-pattern", TOPIC_REGEX);
-                            options.put(
-                                    "scan.startup.mode",
-                                    ScanStartupMode.EARLIEST_OFFSET.toString());
-                            options.remove("scan.startup.specific-offsets");
-                        });
+        final Map<String, String> modifiedOptions = getModifiedOptions(
+                getBasicSourceOptions(),
+                options -> {
+                    options.remove("topic");
+                    options.put("topic-pattern", TOPIC_REGEX);
+                    options.put(
+                            "scan.startup.mode",
+                            ScanStartupMode.EARLIEST_OFFSET.toString());
+                    options.remove("scan.startup.specific-offsets");
+                });
         final DynamicTableSource actualSource = createTableSource(SCHEMA, modifiedOptions);
 
         final Map<KafkaTopicPartition, Long> specificOffsets = new HashMap<>();
 
-        DecodingFormat<DeserializationSchema<RowData>> valueDecodingFormat =
-                new DecodingFormatMock(",", true);
+        DecodingFormat<DeserializationSchema<RowData>> valueDecodingFormat = new DecodingFormatMock(",", true);
 
         // Test scan source equals
-        final KafkaDynamicSource expectedKafkaSource =
-                createExpectedScanSource(
-                        SCHEMA_DATA_TYPE,
-                        null,
-                        valueDecodingFormat,
-                        new int[0],
-                        new int[] {0, 1, 2},
-                        null,
-                        null,
-                        Pattern.compile(TOPIC_REGEX),
-                        KAFKA_SOURCE_PROPERTIES,
-                        StartupMode.EARLIEST,
-                        specificOffsets,
-                        0);
+        final KafkaDynamicSource expectedKafkaSource = createExpectedScanSource(
+                SCHEMA_DATA_TYPE,
+                null,
+                valueDecodingFormat,
+                new int[0],
+                new int[] { 0, 1, 2 },
+                null,
+                null,
+                Pattern.compile(TOPIC_REGEX),
+                KAFKA_SOURCE_PROPERTIES,
+                StartupMode.EARLIEST,
+                specificOffsets,
+                0);
         final KafkaDynamicSource actualKafkaSource = (KafkaDynamicSource) actualSource;
         assertThat(actualKafkaSource).isEqualTo(expectedKafkaSource);
 
-        ScanTableSource.ScanRuntimeProvider provider =
-                actualKafkaSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
+        ScanTableSource.ScanRuntimeProvider provider = actualKafkaSource
+                .getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
 
         assertKafkaSource(provider);
     }
@@ -274,30 +265,28 @@ public class KafkaDynamicTableFactoryTest {
         actualKafkaSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
 
         final DecodingFormatMock keyDecodingFormat = new DecodingFormatMock("#", false);
-        keyDecodingFormat.producedDataType =
-                DataTypes.ROW(DataTypes.FIELD(NAME, DataTypes.STRING().notNull())).notNull();
+        keyDecodingFormat.producedDataType = DataTypes.ROW(DataTypes.FIELD(NAME, DataTypes.STRING().notNull()))
+                .notNull();
 
         final DecodingFormatMock valueDecodingFormat = new DecodingFormatMock("|", false);
-        valueDecodingFormat.producedDataType =
-                DataTypes.ROW(
-                                DataTypes.FIELD(COUNT, DataTypes.DECIMAL(38, 18)),
-                                DataTypes.FIELD(TIME, DataTypes.TIMESTAMP(3)))
-                        .notNull();
+        valueDecodingFormat.producedDataType = DataTypes.ROW(
+                DataTypes.FIELD(COUNT, DataTypes.DECIMAL(38, 18)),
+                DataTypes.FIELD(TIME, DataTypes.TIMESTAMP(3)))
+                .notNull();
 
-        final KafkaDynamicSource expectedKafkaSource =
-                createExpectedScanSource(
-                        SCHEMA_DATA_TYPE,
-                        keyDecodingFormat,
-                        valueDecodingFormat,
-                        new int[] {0},
-                        new int[] {1, 2},
-                        null,
-                        Collections.singletonList(TOPIC),
-                        null,
-                        KAFKA_FINAL_SOURCE_PROPERTIES,
-                        StartupMode.GROUP_OFFSETS,
-                        Collections.emptyMap(),
-                        0);
+        final KafkaDynamicSource expectedKafkaSource = createExpectedScanSource(
+                SCHEMA_DATA_TYPE,
+                keyDecodingFormat,
+                valueDecodingFormat,
+                new int[] { 0 },
+                new int[] { 1, 2 },
+                null,
+                Collections.singletonList(TOPIC),
+                null,
+                KAFKA_FINAL_SOURCE_PROPERTIES,
+                StartupMode.GROUP_OFFSETS,
+                Collections.emptyMap(),
+                0);
 
         assertThat(actualSource).isEqualTo(expectedKafkaSource);
     }
@@ -315,40 +304,35 @@ public class KafkaDynamicTableFactoryTest {
                 SCHEMA_WITH_METADATA.toSourceRowDataType());
         actualKafkaSource.getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
 
-        final DecodingFormatMock expectedKeyFormat =
-                new DecodingFormatMock(
-                        "#", false, ChangelogMode.insertOnly(), Collections.emptyMap());
-        expectedKeyFormat.producedDataType =
-                DataTypes.ROW(DataTypes.FIELD(NAME, DataTypes.STRING())).notNull();
+        final DecodingFormatMock expectedKeyFormat = new DecodingFormatMock(
+                "#", false, ChangelogMode.insertOnly(), Collections.emptyMap());
+        expectedKeyFormat.producedDataType = DataTypes.ROW(DataTypes.FIELD(NAME, DataTypes.STRING())).notNull();
 
         final Map<String, DataType> expectedReadableMetadata = new HashMap<>();
         expectedReadableMetadata.put("metadata_1", DataTypes.INT());
         expectedReadableMetadata.put("metadata_2", DataTypes.STRING());
 
-        final DecodingFormatMock expectedValueFormat =
-                new DecodingFormatMock(
-                        "|", false, ChangelogMode.insertOnly(), expectedReadableMetadata);
-        expectedValueFormat.producedDataType =
-                DataTypes.ROW(
-                                DataTypes.FIELD(COUNT, DataTypes.DECIMAL(38, 18)),
-                                DataTypes.FIELD("metadata_2", DataTypes.STRING()))
-                        .notNull();
+        final DecodingFormatMock expectedValueFormat = new DecodingFormatMock(
+                "|", false, ChangelogMode.insertOnly(), expectedReadableMetadata);
+        expectedValueFormat.producedDataType = DataTypes.ROW(
+                DataTypes.FIELD(COUNT, DataTypes.DECIMAL(38, 18)),
+                DataTypes.FIELD("metadata_2", DataTypes.STRING()))
+                .notNull();
         expectedValueFormat.metadataKeys = Collections.singletonList("metadata_2");
 
-        final KafkaDynamicSource expectedKafkaSource =
-                createExpectedScanSource(
-                        SCHEMA_WITH_METADATA.toPhysicalRowDataType(),
-                        expectedKeyFormat,
-                        expectedValueFormat,
-                        new int[] {0},
-                        new int[] {1},
-                        null,
-                        Collections.singletonList(TOPIC),
-                        null,
-                        KAFKA_FINAL_SOURCE_PROPERTIES,
-                        StartupMode.GROUP_OFFSETS,
-                        Collections.emptyMap(),
-                        0);
+        final KafkaDynamicSource expectedKafkaSource = createExpectedScanSource(
+                SCHEMA_WITH_METADATA.toPhysicalRowDataType(),
+                expectedKeyFormat,
+                expectedValueFormat,
+                new int[] { 0 },
+                new int[] { 1 },
+                null,
+                Collections.singletonList(TOPIC),
+                null,
+                KAFKA_FINAL_SOURCE_PROPERTIES,
+                StartupMode.GROUP_OFFSETS,
+                Collections.emptyMap(),
+                0);
         expectedKafkaSource.producedDataType = SCHEMA_WITH_METADATA.toSourceRowDataType();
         expectedKafkaSource.metadataKeys = Collections.singletonList("timestamp");
 
@@ -357,32 +341,30 @@ public class KafkaDynamicTableFactoryTest {
 
     @Test
     public void testTableSourceCommitOnCheckpointDisabled() {
-        final Map<String, String> modifiedOptions =
-                getModifiedOptions(
-                        getBasicSourceOptions(), options -> options.remove("properties.group.id"));
+        final Map<String, String> modifiedOptions = getModifiedOptions(
+                getBasicSourceOptions(), options -> options.remove("properties.group.id"));
         final DynamicTableSource tableSource = createTableSource(SCHEMA, modifiedOptions);
 
         assertThat(tableSource).isInstanceOf(KafkaDynamicSource.class);
-        ScanTableSource.ScanRuntimeProvider providerWithoutGroupId =
-                ((KafkaDynamicSource) tableSource)
-                        .getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
+        ScanTableSource.ScanRuntimeProvider providerWithoutGroupId = ((KafkaDynamicSource) tableSource)
+                .getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
         assertThat(providerWithoutGroupId).isInstanceOf(DataStreamScanProvider.class);
         final KafkaSource<?> kafkaSource = assertKafkaSource(providerWithoutGroupId);
-        final Configuration configuration =
-                KafkaSourceTestUtils.getKafkaSourceConfiguration(kafkaSource);
+        final Configuration configuration = KafkaSourceTestUtils.getKafkaSourceConfiguration(kafkaSource);
 
-        // Test offset commit on checkpoint should be disabled when do not set consumer group.
+        // Test offset commit on checkpoint should be disabled when do not set consumer
+        // group.
         assertThat(configuration.get(KafkaSourceOptions.COMMIT_OFFSETS_ON_CHECKPOINT)).isFalse();
         assertThat(
-                        configuration.get(
-                                ConfigOptions.key(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG)
-                                        .booleanType()
-                                        .noDefaultValue()))
+                configuration.get(
+                        ConfigOptions.key(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG)
+                                .booleanType()
+                                .noDefaultValue()))
                 .isFalse();
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"none", "earliest", "latest"})
+    @ValueSource(strings = { "none", "earliest", "latest" })
     @NullSource
     public void testTableSourceSetOffsetReset(final String strategyName) {
         testSetOffsetResetForStartFromGroupOffsets(strategyName);
@@ -400,27 +382,24 @@ public class KafkaDynamicTableFactoryTest {
     }
 
     private void testSetOffsetResetForStartFromGroupOffsets(String value) {
-        final Map<String, String> modifiedOptions =
-                getModifiedOptions(
-                        getBasicSourceOptions(),
-                        options -> {
-                            options.remove("scan.startup.mode");
-                            if (value == null) {
-                                return;
-                            }
-                            options.put(
-                                    PROPERTIES_PREFIX + ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
-                                    value);
-                        });
+        final Map<String, String> modifiedOptions = getModifiedOptions(
+                getBasicSourceOptions(),
+                options -> {
+                    options.remove("scan.startup.mode");
+                    if (value == null) {
+                        return;
+                    }
+                    options.put(
+                            PROPERTIES_PREFIX + ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
+                            value);
+                });
         final DynamicTableSource tableSource = createTableSource(SCHEMA, modifiedOptions);
         assertThat(tableSource).isInstanceOf(KafkaDynamicSource.class);
-        ScanTableSource.ScanRuntimeProvider provider =
-                ((KafkaDynamicSource) tableSource)
-                        .getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
+        ScanTableSource.ScanRuntimeProvider provider = ((KafkaDynamicSource) tableSource)
+                .getScanRuntimeProvider(ScanRuntimeProviderContext.INSTANCE);
         assertThat(provider).isInstanceOf(DataStreamScanProvider.class);
         final KafkaSource<?> kafkaSource = assertKafkaSource(provider);
-        final Configuration configuration =
-                KafkaSourceTestUtils.getKafkaSourceConfiguration(kafkaSource);
+        final Configuration configuration = KafkaSourceTestUtils.getKafkaSourceConfiguration(kafkaSource);
 
         if (value == null) {
             assertThat(configuration.toMap().get(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG))
@@ -433,38 +412,35 @@ public class KafkaDynamicTableFactoryTest {
 
     @Test
     public void testTableSink() {
-        final Map<String, String> modifiedOptions =
-                getModifiedOptions(
-                        getBasicSinkOptions(),
-                        options -> {
-                            options.put("sink.delivery-guarantee", "exactly-once");
-                            options.put("sink.transactional-id-prefix", "kafka-sink");
-                        });
+        final Map<String, String> modifiedOptions = getModifiedOptions(
+                getBasicSinkOptions(),
+                options -> {
+                    options.put("sink.delivery-guarantee", "exactly-once");
+                    options.put("sink.transactional-id-prefix", "kafka-sink");
+                });
         final DynamicTableSink actualSink = createTableSink(SCHEMA, modifiedOptions);
 
-        final EncodingFormat<SerializationSchema<RowData>> valueEncodingFormat =
-                new EncodingFormatMock(",");
+        final EncodingFormat<SerializationSchema<RowData>> valueEncodingFormat = new EncodingFormatMock(",");
 
-        final DynamicTableSink expectedSink =
-                createExpectedSink(
-                        SCHEMA_DATA_TYPE,
-                        null,
-                        valueEncodingFormat,
-                        new int[0],
-                        new int[] {0, 1, 2},
-                        null,
-                        TOPIC,
-                        KAFKA_SINK_PROPERTIES,
-                        new FlinkFixedPartitioner<>(),
-                        DeliveryGuarantee.EXACTLY_ONCE,
-                        null,
-                        "kafka-sink");
+        final DynamicTableSink expectedSink = createExpectedSink(
+                SCHEMA_DATA_TYPE,
+                null,
+                valueEncodingFormat,
+                new int[0],
+                new int[] { 0, 1, 2 },
+                null,
+                TOPIC,
+                KAFKA_SINK_PROPERTIES,
+                new FlinkFixedPartitioner<>(),
+                DeliveryGuarantee.EXACTLY_ONCE,
+                null,
+                "kafka-sink");
         assertThat(actualSink).isEqualTo(expectedSink);
 
         // Test kafka producer.
         final KafkaDynamicSink actualKafkaSink = (KafkaDynamicSink) actualSink;
-        DynamicTableSink.SinkRuntimeProvider provider =
-                actualKafkaSink.getSinkRuntimeProvider(new SinkRuntimeProviderContext(false));
+        DynamicTableSink.SinkRuntimeProvider provider = actualKafkaSink
+                .getSinkRuntimeProvider(new SinkRuntimeProviderContext(false));
         assertThat(provider).isInstanceOf(SinkV2Provider.class);
         final SinkV2Provider sinkProvider = (SinkV2Provider) provider;
         final Sink<RowData> sinkFunction = sinkProvider.createSink();
@@ -474,106 +450,97 @@ public class KafkaDynamicTableFactoryTest {
     @Test
     public void testTableSinkSemanticTranslation() {
         final List<String> semantics = ImmutableList.of("exactly-once", "at-least-once", "none");
-        final EncodingFormat<SerializationSchema<RowData>> valueEncodingFormat =
-                new EncodingFormatMock(",");
+        final EncodingFormat<SerializationSchema<RowData>> valueEncodingFormat = new EncodingFormatMock(",");
         for (final String semantic : semantics) {
-            final Map<String, String> modifiedOptions =
-                    getModifiedOptions(
-                            getBasicSinkOptions(),
-                            options -> {
-                                options.put("sink.semantic", semantic);
-                                options.put("sink.transactional-id-prefix", "kafka-sink");
-                            });
+            final Map<String, String> modifiedOptions = getModifiedOptions(
+                    getBasicSinkOptions(),
+                    options -> {
+                        options.put("sink.semantic", semantic);
+                        options.put("sink.transactional-id-prefix", "kafka-sink");
+                    });
             final DynamicTableSink actualSink = createTableSink(SCHEMA, modifiedOptions);
-            final DynamicTableSink expectedSink =
-                    createExpectedSink(
-                            SCHEMA_DATA_TYPE,
-                            null,
-                            valueEncodingFormat,
-                            new int[0],
-                            new int[] {0, 1, 2},
-                            null,
-                            TOPIC,
-                            KAFKA_SINK_PROPERTIES,
-                            new FlinkFixedPartitioner<>(),
-                            DeliveryGuarantee.valueOf(semantic.toUpperCase().replace("-", "_")),
-                            null,
-                            "kafka-sink");
+            final DynamicTableSink expectedSink = createExpectedSink(
+                    SCHEMA_DATA_TYPE,
+                    null,
+                    valueEncodingFormat,
+                    new int[0],
+                    new int[] { 0, 1, 2 },
+                    null,
+                    TOPIC,
+                    KAFKA_SINK_PROPERTIES,
+                    new FlinkFixedPartitioner<>(),
+                    DeliveryGuarantee.valueOf(semantic.toUpperCase().replace("-", "_")),
+                    null,
+                    "kafka-sink");
             assertThat(actualSink).isEqualTo(expectedSink);
         }
     }
 
     @Test
     public void testTableSinkWithKeyValue() {
-        final Map<String, String> modifiedOptions =
-                getModifiedOptions(
-                        getKeyValueOptions(),
-                        options -> {
-                            options.put("sink.delivery-guarantee", "exactly-once");
-                            options.put("sink.transactional-id-prefix", "kafka-sink");
-                        });
+        final Map<String, String> modifiedOptions = getModifiedOptions(
+                getKeyValueOptions(),
+                options -> {
+                    options.put("sink.delivery-guarantee", "exactly-once");
+                    options.put("sink.transactional-id-prefix", "kafka-sink");
+                });
         final DynamicTableSink actualSink = createTableSink(SCHEMA, modifiedOptions);
         final KafkaDynamicSink actualKafkaSink = (KafkaDynamicSink) actualSink;
         // initialize stateful testing formats
         actualKafkaSink.getSinkRuntimeProvider(new SinkRuntimeProviderContext(false));
 
         final EncodingFormatMock keyEncodingFormat = new EncodingFormatMock("#");
-        keyEncodingFormat.consumedDataType =
-                DataTypes.ROW(DataTypes.FIELD(NAME, DataTypes.STRING().notNull())).notNull();
+        keyEncodingFormat.consumedDataType = DataTypes.ROW(DataTypes.FIELD(NAME, DataTypes.STRING().notNull()))
+                .notNull();
 
         final EncodingFormatMock valueEncodingFormat = new EncodingFormatMock("|");
-        valueEncodingFormat.consumedDataType =
-                DataTypes.ROW(
-                                DataTypes.FIELD(COUNT, DataTypes.DECIMAL(38, 18)),
-                                DataTypes.FIELD(TIME, DataTypes.TIMESTAMP(3)))
-                        .notNull();
+        valueEncodingFormat.consumedDataType = DataTypes.ROW(
+                DataTypes.FIELD(COUNT, DataTypes.DECIMAL(38, 18)),
+                DataTypes.FIELD(TIME, DataTypes.TIMESTAMP(3)))
+                .notNull();
 
-        final DynamicTableSink expectedSink =
-                createExpectedSink(
-                        SCHEMA_DATA_TYPE,
-                        keyEncodingFormat,
-                        valueEncodingFormat,
-                        new int[] {0},
-                        new int[] {1, 2},
-                        null,
-                        TOPIC,
-                        KAFKA_FINAL_SINK_PROPERTIES,
-                        new FlinkFixedPartitioner<>(),
-                        DeliveryGuarantee.EXACTLY_ONCE,
-                        null,
-                        "kafka-sink");
+        final DynamicTableSink expectedSink = createExpectedSink(
+                SCHEMA_DATA_TYPE,
+                keyEncodingFormat,
+                valueEncodingFormat,
+                new int[] { 0 },
+                new int[] { 1, 2 },
+                null,
+                TOPIC,
+                KAFKA_FINAL_SINK_PROPERTIES,
+                new FlinkFixedPartitioner<>(),
+                DeliveryGuarantee.EXACTLY_ONCE,
+                null,
+                "kafka-sink");
 
         assertThat(actualSink).isEqualTo(expectedSink);
     }
 
     @Test
     public void testTableSinkWithParallelism() {
-        final Map<String, String> modifiedOptions =
-                getModifiedOptions(
-                        getBasicSinkOptions(), options -> options.put("sink.parallelism", "100"));
+        final Map<String, String> modifiedOptions = getModifiedOptions(
+                getBasicSinkOptions(), options -> options.put("sink.parallelism", "100"));
         KafkaDynamicSink actualSink = (KafkaDynamicSink) createTableSink(SCHEMA, modifiedOptions);
 
-        final EncodingFormat<SerializationSchema<RowData>> valueEncodingFormat =
-                new EncodingFormatMock(",");
+        final EncodingFormat<SerializationSchema<RowData>> valueEncodingFormat = new EncodingFormatMock(",");
 
-        final DynamicTableSink expectedSink =
-                createExpectedSink(
-                        SCHEMA_DATA_TYPE,
-                        null,
-                        valueEncodingFormat,
-                        new int[0],
-                        new int[] {0, 1, 2},
-                        null,
-                        TOPIC,
-                        KAFKA_SINK_PROPERTIES,
-                        new FlinkFixedPartitioner<>(),
-                        DeliveryGuarantee.EXACTLY_ONCE,
-                        100,
-                        "kafka-sink");
+        final DynamicTableSink expectedSink = createExpectedSink(
+                SCHEMA_DATA_TYPE,
+                null,
+                valueEncodingFormat,
+                new int[0],
+                new int[] { 0, 1, 2 },
+                null,
+                TOPIC,
+                KAFKA_SINK_PROPERTIES,
+                new FlinkFixedPartitioner<>(),
+                DeliveryGuarantee.EXACTLY_ONCE,
+                100,
+                "kafka-sink");
         assertThat(actualSink).isEqualTo(expectedSink);
 
-        final DynamicTableSink.SinkRuntimeProvider provider =
-                actualSink.getSinkRuntimeProvider(new SinkRuntimeProviderContext(false));
+        final DynamicTableSink.SinkRuntimeProvider provider = actualSink
+                .getSinkRuntimeProvider(new SinkRuntimeProviderContext(false));
         assertThat(provider).isInstanceOf(SinkV2Provider.class);
         final SinkV2Provider sinkProvider = (SinkV2Provider) provider;
         assertThat(sinkProvider.getParallelism().isPresent()).isTrue();
@@ -671,10 +638,9 @@ public class KafkaDynamicTableFactoryTest {
         optionModifier.accept(options);
 
         final RowType rowType = (RowType) SCHEMA_DATA_TYPE.getLogicalType();
-        final String valueFormat =
-                options.getOrDefault(
-                        FactoryUtil.FORMAT.key(),
-                        options.get(KafkaConnectorOptions.VALUE_FORMAT.key()));
+        final String valueFormat = options.getOrDefault(
+                FactoryUtil.FORMAT.key(),
+                options.get(KafkaConnectorOptions.VALUE_FORMAT.key()));
         final String keyFormat = options.get(KafkaConnectorOptions.KEY_FORMAT.key());
 
         KafkaDynamicSink sink = (KafkaDynamicSink) createTableSink(SCHEMA, options);
@@ -683,9 +649,8 @@ public class KafkaDynamicTableFactoryTest {
         avroFormats.add(DEBEZIUM_AVRO_CONFLUENT);
 
         if (avroFormats.contains(valueFormat)) {
-            SerializationSchema<RowData> actualValueEncoder =
-                    sink.valueEncodingFormat.createRuntimeEncoder(
-                            new SinkRuntimeProviderContext(false), SCHEMA_DATA_TYPE);
+            SerializationSchema<RowData> actualValueEncoder = sink.valueEncodingFormat.createRuntimeEncoder(
+                    new SinkRuntimeProviderContext(false), SCHEMA_DATA_TYPE);
             final SerializationSchema<RowData> expectedValueEncoder;
             if (AVRO_CONFLUENT.equals(valueFormat)) {
                 expectedValueEncoder = createConfluentAvroSerSchema(rowType, expectedValueSubject);
@@ -697,9 +662,8 @@ public class KafkaDynamicTableFactoryTest {
 
         if (avroFormats.contains(keyFormat)) {
             assert sink.keyEncodingFormat != null;
-            SerializationSchema<RowData> actualKeyEncoder =
-                    sink.keyEncodingFormat.createRuntimeEncoder(
-                            new SinkRuntimeProviderContext(false), SCHEMA_DATA_TYPE);
+            SerializationSchema<RowData> actualKeyEncoder = sink.keyEncodingFormat.createRuntimeEncoder(
+                    new SinkRuntimeProviderContext(false), SCHEMA_DATA_TYPE);
             final SerializationSchema<RowData> expectedKeyEncoder;
             if (AVRO_CONFLUENT.equals(keyFormat)) {
                 expectedKeyEncoder = createConfluentAvroSerSchema(rowType, expectedKeySubject);
@@ -731,17 +695,16 @@ public class KafkaDynamicTableFactoryTest {
     @Test
     public void testSourceTableWithTopicAndTopicPattern() {
         assertThatThrownBy(
-                        () -> {
-                            final Map<String, String> modifiedOptions =
-                                    getModifiedOptions(
-                                            getBasicSourceOptions(),
-                                            options -> {
-                                                options.put("topic", TOPICS);
-                                                options.put("topic-pattern", TOPIC_REGEX);
-                                            });
+                () -> {
+                    final Map<String, String> modifiedOptions = getModifiedOptions(
+                            getBasicSourceOptions(),
+                            options -> {
+                                options.put("topic", TOPICS);
+                                options.put("topic-pattern", TOPIC_REGEX);
+                            });
 
-                            createTableSource(SCHEMA, modifiedOptions);
-                        })
+                    createTableSource(SCHEMA, modifiedOptions);
+                })
                 .isInstanceOf(ValidationException.class)
                 .satisfies(
                         containsCause(
@@ -752,15 +715,13 @@ public class KafkaDynamicTableFactoryTest {
     @Test
     public void testMissingStartupTimestamp() {
         assertThatThrownBy(
-                        () -> {
-                            final Map<String, String> modifiedOptions =
-                                    getModifiedOptions(
-                                            getBasicSourceOptions(),
-                                            options ->
-                                                    options.put("scan.startup.mode", "timestamp"));
+                () -> {
+                    final Map<String, String> modifiedOptions = getModifiedOptions(
+                            getBasicSourceOptions(),
+                            options -> options.put("scan.startup.mode", "timestamp"));
 
-                            createTableSource(SCHEMA, modifiedOptions);
-                        })
+                    createTableSource(SCHEMA, modifiedOptions);
+                })
                 .isInstanceOf(ValidationException.class)
                 .satisfies(
                         containsCause(
@@ -772,16 +733,14 @@ public class KafkaDynamicTableFactoryTest {
     @Test
     public void testMissingSpecificOffsets() {
         assertThatThrownBy(
-                        () -> {
-                            final Map<String, String> modifiedOptions =
-                                    getModifiedOptions(
-                                            getBasicSourceOptions(),
-                                            options ->
-                                                    options.remove(
-                                                            "scan.startup.specific-offsets"));
+                () -> {
+                    final Map<String, String> modifiedOptions = getModifiedOptions(
+                            getBasicSourceOptions(),
+                            options -> options.remove(
+                                    "scan.startup.specific-offsets"));
 
-                            createTableSource(SCHEMA, modifiedOptions);
-                        })
+                    createTableSource(SCHEMA, modifiedOptions);
+                })
                 .isInstanceOf(ValidationException.class)
                 .satisfies(
                         containsCause(
@@ -793,14 +752,13 @@ public class KafkaDynamicTableFactoryTest {
     @Test
     public void testInvalidSinkPartitioner() {
         assertThatThrownBy(
-                        () -> {
-                            final Map<String, String> modifiedOptions =
-                                    getModifiedOptions(
-                                            getBasicSinkOptions(),
-                                            options -> options.put("sink.partitioner", "abc"));
+                () -> {
+                    final Map<String, String> modifiedOptions = getModifiedOptions(
+                            getBasicSinkOptions(),
+                            options -> options.put("sink.partitioner", "abc"));
 
-                            createTableSink(SCHEMA, modifiedOptions);
-                        })
+                    createTableSink(SCHEMA, modifiedOptions);
+                })
                 .isInstanceOf(ValidationException.class)
                 .satisfies(
                         containsCause(
@@ -812,15 +770,13 @@ public class KafkaDynamicTableFactoryTest {
     @Test
     public void testInvalidRoundRobinPartitionerWithKeyFields() {
         assertThatThrownBy(
-                        () -> {
-                            final Map<String, String> modifiedOptions =
-                                    getModifiedOptions(
-                                            getKeyValueOptions(),
-                                            options ->
-                                                    options.put("sink.partitioner", "round-robin"));
+                () -> {
+                    final Map<String, String> modifiedOptions = getModifiedOptions(
+                            getKeyValueOptions(),
+                            options -> options.put("sink.partitioner", "round-robin"));
 
-                            createTableSink(SCHEMA, modifiedOptions);
-                        })
+                    createTableSink(SCHEMA, modifiedOptions);
+                })
                 .isInstanceOf(ValidationException.class)
                 .satisfies(
                         containsCause(
@@ -832,22 +788,20 @@ public class KafkaDynamicTableFactoryTest {
     @Test
     public void testExactlyOnceGuaranteeWithoutTransactionalIdPrefix() {
         assertThatThrownBy(
-                        () -> {
-                            final Map<String, String> modifiedOptions =
-                                    getModifiedOptions(
-                                            getKeyValueOptions(),
-                                            options -> {
-                                                options.remove(
-                                                        KafkaConnectorOptions
-                                                                .TRANSACTIONAL_ID_PREFIX
-                                                                .key());
-                                                options.put(
-                                                        KafkaConnectorOptions.DELIVERY_GUARANTEE
-                                                                .key(),
-                                                        DeliveryGuarantee.EXACTLY_ONCE.toString());
-                                            });
-                            createTableSink(SCHEMA, modifiedOptions);
-                        })
+                () -> {
+                    final Map<String, String> modifiedOptions = getModifiedOptions(
+                            getKeyValueOptions(),
+                            options -> {
+                                options.remove(
+                                        KafkaConnectorOptions.TRANSACTIONAL_ID_PREFIX
+                                                .key());
+                                options.put(
+                                        KafkaConnectorOptions.DELIVERY_GUARANTEE
+                                                .key(),
+                                        DeliveryGuarantee.EXACTLY_ONCE.toString());
+                            });
+                    createTableSink(SCHEMA, modifiedOptions);
+                })
                 .isInstanceOf(ValidationException.class)
                 .satisfies(
                         containsCause(
@@ -857,16 +811,14 @@ public class KafkaDynamicTableFactoryTest {
 
     @Test
     public void testSinkWithTopicListOrTopicPattern() {
-        Map<String, String> modifiedOptions =
-                getModifiedOptions(
-                        getBasicSinkOptions(),
-                        options -> {
-                            options.put("topic", TOPICS);
-                            options.put("scan.startup.mode", "earliest-offset");
-                            options.remove("specific-offsets");
-                        });
-        final String errorMessageTemp =
-                "Flink Kafka sink currently only supports single topic, but got %s: %s.";
+        Map<String, String> modifiedOptions = getModifiedOptions(
+                getBasicSinkOptions(),
+                options -> {
+                    options.put("topic", TOPICS);
+                    options.put("scan.startup.mode", "earliest-offset");
+                    options.remove("specific-offsets");
+                });
+        final String errorMessageTemp = "Flink Kafka sink currently only supports single topic, but got %s: %s.";
 
         try {
             createTableSink(SCHEMA, modifiedOptions);
@@ -879,10 +831,9 @@ public class KafkaDynamicTableFactoryTest {
                                     String.format("[%s]", String.join(", ", TOPIC_LIST))));
         }
 
-        modifiedOptions =
-                getModifiedOptions(
-                        getBasicSinkOptions(),
-                        options -> options.put("topic-pattern", TOPIC_REGEX));
+        modifiedOptions = getModifiedOptions(
+                getBasicSinkOptions(),
+                options -> options.put("topic-pattern", TOPIC_REGEX));
 
         try {
             createTableSink(SCHEMA, modifiedOptions);
@@ -894,22 +845,19 @@ public class KafkaDynamicTableFactoryTest {
 
     @Test
     public void testPrimaryKeyValidation() {
-        final ResolvedSchema pkSchema =
-                new ResolvedSchema(
-                        SCHEMA.getColumns(),
-                        SCHEMA.getWatermarkSpecs(),
-                        UniqueConstraint.primaryKey(NAME, Collections.singletonList(NAME)));
+        final ResolvedSchema pkSchema = new ResolvedSchema(
+                SCHEMA.getColumns(),
+                SCHEMA.getWatermarkSpecs(),
+                UniqueConstraint.primaryKey(NAME, Collections.singletonList(NAME)));
 
-        Map<String, String> sinkOptions =
-                getModifiedOptions(
-                        getBasicSinkOptions(),
-                        options ->
-                                options.put(
-                                        String.format(
-                                                "%s.%s",
-                                                TestFormatFactory.IDENTIFIER,
-                                                TestFormatFactory.CHANGELOG_MODE.key()),
-                                        "I;UA;UB;D"));
+        Map<String, String> sinkOptions = getModifiedOptions(
+                getBasicSinkOptions(),
+                options -> options.put(
+                        String.format(
+                                "%s.%s",
+                                TestFormatFactory.IDENTIFIER,
+                                TestFormatFactory.CHANGELOG_MODE.key()),
+                        "I;UA;UB;D"));
         // pk can be defined on cdc table, should pass
         createTableSink(pkSchema, sinkOptions);
 
@@ -929,16 +877,14 @@ public class KafkaDynamicTableFactoryTest {
                                 + " doesn't support defining PRIMARY KEY constraint on the table, because it can't"
                                 + " guarantee the semantic of primary key.");
 
-        Map<String, String> sourceOptions =
-                getModifiedOptions(
-                        getBasicSourceOptions(),
-                        options ->
-                                options.put(
-                                        String.format(
-                                                "%s.%s",
-                                                TestFormatFactory.IDENTIFIER,
-                                                TestFormatFactory.CHANGELOG_MODE.key()),
-                                        "I;UA;UB;D"));
+        Map<String, String> sourceOptions = getModifiedOptions(
+                getBasicSourceOptions(),
+                options -> options.put(
+                        String.format(
+                                "%s.%s",
+                                TestFormatFactory.IDENTIFIER,
+                                TestFormatFactory.CHANGELOG_MODE.key()),
+                        "I;UA;UB;D"));
         // pk can be defined on cdc table, should pass
         createTableSource(pkSchema, sourceOptions);
 
@@ -982,6 +928,7 @@ public class KafkaDynamicTableFactoryTest {
                 specificStartupOffsets,
                 startupTimestampMillis,
                 false,
+                -1 /* sourceParallelism */,
                 FactoryMocks.IDENTIFIER.asSummaryString());
     }
 
@@ -1017,7 +964,8 @@ public class KafkaDynamicTableFactoryTest {
     }
 
     /**
-     * Returns the full options modified by the given consumer {@code optionModifier}.
+     * Returns the full options modified by the given consumer
+     * {@code optionModifier}.
      *
      * @param optionModifier Consumer to modify the options
      */
@@ -1039,13 +987,11 @@ public class KafkaDynamicTableFactoryTest {
         tableOptions.put("scan.topic-partition-discovery.interval", DISCOVERY_INTERVAL);
         // Format options.
         tableOptions.put("format", TestFormatFactory.IDENTIFIER);
-        final String formatDelimiterKey =
-                String.format(
-                        "%s.%s", TestFormatFactory.IDENTIFIER, TestFormatFactory.DELIMITER.key());
-        final String failOnMissingKey =
-                String.format(
-                        "%s.%s",
-                        TestFormatFactory.IDENTIFIER, TestFormatFactory.FAIL_ON_MISSING.key());
+        final String formatDelimiterKey = String.format(
+                "%s.%s", TestFormatFactory.IDENTIFIER, TestFormatFactory.DELIMITER.key());
+        final String failOnMissingKey = String.format(
+                "%s.%s",
+                TestFormatFactory.IDENTIFIER, TestFormatFactory.FAIL_ON_MISSING.key());
         tableOptions.put(formatDelimiterKey, ",");
         tableOptions.put(failOnMissingKey, "true");
         return tableOptions;
@@ -1064,9 +1010,8 @@ public class KafkaDynamicTableFactoryTest {
         tableOptions.put("sink.transactional-id-prefix", "kafka-sink");
         // Format options.
         tableOptions.put("format", TestFormatFactory.IDENTIFIER);
-        final String formatDelimiterKey =
-                String.format(
-                        "%s.%s", TestFormatFactory.IDENTIFIER, TestFormatFactory.DELIMITER.key());
+        final String formatDelimiterKey = String.format(
+                "%s.%s", TestFormatFactory.IDENTIFIER, TestFormatFactory.DELIMITER.key());
         tableOptions.put(formatDelimiterKey, ",");
         return tableOptions;
     }
@@ -1106,17 +1051,13 @@ public class KafkaDynamicTableFactoryTest {
     private KafkaSource<?> assertKafkaSource(ScanTableSource.ScanRuntimeProvider provider) {
         assertThat(provider).isInstanceOf(DataStreamScanProvider.class);
         final DataStreamScanProvider dataStreamScanProvider = (DataStreamScanProvider) provider;
-        final Transformation<RowData> transformation =
-                dataStreamScanProvider
-                        .produceDataStream(
-                                n -> Optional.empty(),
-                                StreamExecutionEnvironment.createLocalEnvironment())
-                        .getTransformation();
+        final Transformation<RowData> transformation = dataStreamScanProvider
+                .produceDataStream(
+                        n -> Optional.empty(),
+                        StreamExecutionEnvironment.createLocalEnvironment())
+                .getTransformation();
         assertThat(transformation).isInstanceOf(SourceTransformation.class);
-        SourceTransformation<RowData, KafkaPartitionSplit, KafkaSourceEnumState>
-                sourceTransformation =
-                        (SourceTransformation<RowData, KafkaPartitionSplit, KafkaSourceEnumState>)
-                                transformation;
+        SourceTransformation<RowData, KafkaPartitionSplit, KafkaSourceEnumState> sourceTransformation = (SourceTransformation<RowData, KafkaPartitionSplit, KafkaSourceEnumState>) transformation;
         assertThat(sourceTransformation.getSource()).isInstanceOf(KafkaSource.class);
         return (KafkaSource<?>) sourceTransformation.getSource();
     }

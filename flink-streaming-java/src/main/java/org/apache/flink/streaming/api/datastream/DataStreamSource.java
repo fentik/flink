@@ -29,27 +29,15 @@ import org.apache.flink.streaming.api.operators.StreamSource;
 import org.apache.flink.streaming.api.transformations.LegacySourceTransformation;
 import org.apache.flink.streaming.api.transformations.SourceTransformation;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.Optional;
-
-import org.apache.flink.configuration.ConfigOption;
-import org.apache.flink.configuration.ConfigOptions;
-
 /**
  * The DataStreamSource represents the starting point of a DataStream.
  *
- * @param <T> Type of the elements in the DataStream created from the this
- *            source.
+ * @param <T> Type of the elements in the DataStream created from the this source.
  */
 @Public
 public class DataStreamSource<T> extends SingleOutputStreamOperator<T> {
 
     private final boolean isParallel;
-
-    /** The logger used by the operator class and its subclasses. */
-    protected static final Logger LOG = LoggerFactory.getLogger(DataStreamSource.class);
 
     public DataStreamSource(
             StreamExecutionEnvironment environment,
@@ -80,7 +68,7 @@ public class DataStreamSource<T> extends SingleOutputStreamOperator<T> {
                         sourceName,
                         operator,
                         outTypeInfo,
-                        environment.getSourceParallelism(),
+                        environment.getParallelism(),
                         boundedness));
 
         this.isParallel = isParallel;
@@ -90,8 +78,7 @@ public class DataStreamSource<T> extends SingleOutputStreamOperator<T> {
     }
 
     /**
-     * Constructor for "deep" sources that manually set up (one or more) custom
-     * configured complex
+     * Constructor for "deep" sources that manually set up (one or more) custom configured complex
      * operators.
      */
     public DataStreamSource(SingleOutputStreamOperator<T> operator) {
@@ -113,7 +100,7 @@ public class DataStreamSource<T> extends SingleOutputStreamOperator<T> {
                         source,
                         watermarkStrategy,
                         outTypeInfo,
-                        environment.getSourceParallelism()));
+                        environment.getParallelism()));
         this.isParallel = true;
     }
 
