@@ -48,6 +48,12 @@ public class RocksDBNativeMetricOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Monitor the number of immutable memtables in RocksDB.");
 
+    public static final ConfigOption<Boolean> MONITOR_NUM_IMMUTABLE_MEM_TABLE_FLUSHED =
+            ConfigOptions.key(RocksDBProperty.NumImmutableMemTableFlushed.getConfigKey())
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Monitor the number of immutable memtables flushed.");
+
     public static final ConfigOption<Boolean> MONITOR_MEM_TABLE_FLUSH_PENDING =
             ConfigOptions.key(RocksDBProperty.MemTableFlushPending.getConfigKey())
                     .booleanType()
@@ -189,12 +195,6 @@ public class RocksDBNativeMetricOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Monitor the number of currently running flushes.");
 
-    public static final ConfigOption<Boolean> MONITOR_NUM_COMPLETED_FLUSHES =
-            ConfigOptions.key(RocksDBProperty.NumCompletedFlushes.getConfigKey())
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription("Monitor the number of completed flushes.");
-
     public static final ConfigOption<Boolean> MONITOR_ACTUAL_DELAYED_WRITE_RATE =
             ConfigOptions.key(RocksDBProperty.ActualDelayedWriteRate.getConfigKey())
                     .booleanType()
@@ -322,8 +322,8 @@ public class RocksDBNativeMetricOptions implements Serializable {
             options.enableNumRunningFlushes();
         }
 
-        if (config.get(MONITOR_NUM_COMPLETED_FLUSHES)) {
-            options.enableNumCompletedFlushes();
+        if (config.get(MONITOR_NUM_IMMUTABLE_MEM_TABLE_FLUSHED)) {
+            options.enableNumImmutableMemTableFlushed();
         }
 
         if (config.get(MONITOR_ACTUAL_DELAYED_WRITE_RATE)) {
@@ -361,6 +361,11 @@ public class RocksDBNativeMetricOptions implements Serializable {
     /** Returns number of immutable memtables that have not yet been flushed. */
     public void enableNumImmutableMemTable() {
         this.properties.add(RocksDBProperty.NumImmutableMemTable.getRocksDBProperty());
+    }
+
+    /** Returns the number of immutable memtables that have been flushed. */
+    public void enableNumImmutableMemTableFlushed() {
+        this.properties.add(RocksDBProperty.NumImmutableMemTableFlushed.getRocksDBProperty());
     }
 
     /** Returns 1 if a memtable flush is pending; otherwise, returns 0. */
@@ -479,11 +484,6 @@ public class RocksDBNativeMetricOptions implements Serializable {
     /** Returns the number of currently running flushes. */
     public void enableNumRunningFlushes() {
         this.properties.add(RocksDBProperty.NumRunningFlushes.getRocksDBProperty());
-    }
-
-    /** Returns the number of completed flushes. */
-    public void enableNumCompletedFlushes() {
-        this.properties.add(RocksDBProperty.NumCompletedFlushes.getRocksDBProperty());
     }
 
     /** Returns the current actual delayed write rate. 0 means no delay. */
