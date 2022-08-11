@@ -159,7 +159,7 @@ public class StreamExecJoin extends ExecNodeBase<RowData>
 
         long minRetentionTime = config.getStateRetentionTime();
 
-        final long backfillWatermark = config.get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL_WATERMARK);
+        final boolean isBatchBackfillEnabled = config.get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL);
 
         AbstractStreamingJoinOperator operator;
         FlinkJoinType joinType = joinSpec.getJoinType();
@@ -174,7 +174,7 @@ public class StreamExecJoin extends ExecNodeBase<RowData>
                             rightInputSpec,
                             joinSpec.getFilterNulls(),
                             minRetentionTime,
-                            backfillWatermark);
+                            isBatchBackfillEnabled);
         } else {
             boolean leftIsOuter = joinType == FlinkJoinType.LEFT || joinType == FlinkJoinType.FULL;
             boolean rightIsOuter =
@@ -190,7 +190,7 @@ public class StreamExecJoin extends ExecNodeBase<RowData>
                             rightIsOuter,
                             joinSpec.getFilterNulls(),
                             minRetentionTime,
-                            backfillWatermark);
+                            isBatchBackfillEnabled);
         }
 
         final RowType returnType = (RowType) getOutputType();

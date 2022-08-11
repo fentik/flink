@@ -80,9 +80,6 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
     /** State idle retention time which unit is MILLISECONDS. */
     private final long stateRetentionTime;
 
-    /** timestamp of backfill watermark barrier */
-    private final Watermark backfillWatermark;
-
     private PerKeyStateDataViewStore dataViewStore = null;
 
     /** Reused output row. */
@@ -98,6 +95,7 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
     private transient ValueState<RowData> accState = null;
 
     private boolean isStreamMode = true;
+    private boolean isBatchBackfillEnabled = false;
 
     KeyedStateBackend<RowData> lastBe;
 
@@ -126,18 +124,14 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
             int indexOfCountStar,
             boolean generateUpdateBefore,
             long stateRetentionTime,
-            long backfillWatermark) {
+            boolean isBatchBackfillEnabled) {
         this.genAggsHandler = genAggsHandler;
         this.genRecordEqualiser = genRecordEqualiser;
         this.accTypes = accTypes;
         this.recordCounter = RecordCounter.of(indexOfCountStar);
         this.generateUpdateBefore = generateUpdateBefore;
         this.stateRetentionTime = stateRetentionTime;
-        this.backfillWatermark = new Watermark(backfillWatermark);
-    }
-
-    public Watermark getBackfillWatermark() {
-        return backfillWatermark;
+        this.isBatchBackfillEnabled = isBatchBackfillEnabled;
     }
 
     private String getPrintableName() {
@@ -164,14 +158,12 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
 
         resultRow = new JoinedRowData();
 
-        if (backfillWatermark == null || backfillWatermark.getTimestamp() <= 0) {
-            this.isStreamMode = true;
-            LOG.info("Initializing batch capable {} in stream mode since no backfill watermark is specified",
-                    getPrintableName());
-        } else {
+        if (isBatchBackfillEnabled) {
             this.isStreamMode = false;
-            LOG.info("Initializing batch capable {} in Batch mode with backfill watermark {}",
-                    getPrintableName(), this.backfillWatermark);
+            LOG.info("Initializing batch capable {} in BATCH mode", getPrintableName());
+        } else {
+            this.isStreamMode = true;
+            LOG.info("Initializing batch capable {} in STREAMING mode", getPrintableName());
         }
     }
 

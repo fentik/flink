@@ -52,7 +52,7 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
             JoinInputSideSpec rightInputSideSpec,
             boolean[] filterNullKeys,
             long stateRetentionTime,
-            long backfillWatermark) {
+            boolean batchBackfillEnabled) {
         super(
                 leftType,
                 rightType,
@@ -61,7 +61,7 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
                 rightInputSideSpec,
                 filterNullKeys,
                 stateRetentionTime,
-                backfillWatermark);
+                batchBackfillEnabled);
         this.isAntiJoin = isAntiJoin;
     }
 

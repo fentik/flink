@@ -199,7 +199,7 @@ public class StreamExecGroupAggregate extends StreamExecAggregateBase {
         final int inputCountIndex = aggInfoList.getIndexOfCountStar();
         final boolean isMiniBatchEnabled = config.get(ExecutionConfigOptions.TABLE_EXEC_MINIBATCH_ENABLED);
 
-        final long backfillWatermark = config.get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL_WATERMARK);
+        final boolean isBatchBackfillEnabled = config.get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL); 
 
         final OneInputStreamOperator<RowData, RowData> operator;
         if (isMiniBatchEnabled) {
@@ -221,7 +221,7 @@ public class StreamExecGroupAggregate extends StreamExecAggregateBase {
                     inputCountIndex,
                     generateUpdateBefore,
                     config.getStateRetentionTime(),
-                    backfillWatermark);
+                    isBatchBackfillEnabled);
             operator = new KeyedProcessOperator<>(aggFunction);
         }
 

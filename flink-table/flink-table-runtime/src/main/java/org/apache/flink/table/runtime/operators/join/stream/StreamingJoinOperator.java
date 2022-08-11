@@ -78,7 +78,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
             boolean rightIsOuter,
             boolean[] filterNullKeys,
             long stateRetentionTime,
-            long backfillWatermark) {
+            boolean isBatchBackfillEnabled) {
         super(
                 leftType,
                 rightType,
@@ -87,7 +87,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                 rightInputSideSpec,
                 filterNullKeys,
                 stateRetentionTime,
-                backfillWatermark);
+                isBatchBackfillEnabled);
         this.leftIsOuter = leftIsOuter;
         this.rightIsOuter = rightIsOuter;
     }
@@ -111,7 +111,8 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         if (leftIsOuter && rightIsOuter) {
             // we don't support FULL OUTER yet
             LOG.info("{} FULL OUTER batch mode not supported", getPrintableName());
-            backfillWatermark = -1L;
+            isBatchBackfillEnabled = false;
+            setStreamMode(true);
         }
 
         // initialize states

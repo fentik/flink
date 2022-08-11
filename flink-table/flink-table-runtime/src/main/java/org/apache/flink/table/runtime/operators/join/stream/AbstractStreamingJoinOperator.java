@@ -82,7 +82,7 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
     protected transient JoinConditionWithNullFilters joinCondition;
     protected transient TimestampedCollector<RowData> collector;
 
-    protected long backfillWatermark;
+    protected boolean isBatchBackfillEnabled;
     private boolean isStreamMode = true;
 
     public AbstractStreamingJoinOperator(
@@ -93,7 +93,7 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
             JoinInputSideSpec rightInputSideSpec,
             boolean[] filterNullKeys,
             long stateRetentionTime,
-            long backfillWatermark) {
+            boolean isBatchBackfillEnabled) {
         this.leftType = leftType;
         this.rightType = rightType;
         this.generatedJoinCondition = generatedJoinCondition;
@@ -101,7 +101,7 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
         this.rightInputSideSpec = rightInputSideSpec;
         this.stateRetentionTime = stateRetentionTime;
         this.filterNullKeys = filterNullKeys;
-        this.backfillWatermark = backfillWatermark;
+        this.isBatchBackfillEnabled = isBatchBackfillEnabled;
         this.isStreamMode = true;
     }
 
@@ -118,14 +118,12 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
 
         if (!isHybridStreamBatchCapable()) {
             LOG.info("{} not stream batch capable", getPrintableName());
-        } else if (backfillWatermark <= 0) {
-            this.isStreamMode = true;
-            LOG.info("Initializing batch capable {} in stream mode since no backfill watermark is specified",
-                    getPrintableName());
-        } else {
+        } else if (isBatchBackfillEnabled) {
             this.isStreamMode = false;
-            LOG.info("Initializing batch capable {} in Batch mode with backfill watermark {}",
-                    getPrintableName(), this.backfillWatermark);
+            LOG.info("Initializing batch capable {} in BATCH mode", getPrintableName());
+        } else {
+            this.isStreamMode = true;
+            LOG.info("Initializing batch capable {} in STREAMING mode", getPrintableName());
         }
     }
 
@@ -148,12 +146,10 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
     }
 
     public void processWatermark(Watermark mark) throws Exception {
-        LOG.info("WATERMARK isBatchCapable = {} isBatchMode = {} {} {}", isHybridStreamBatchCapable(),
-            isBatchMode(), getPrintableName(), mark);
-
         if (isBatchMode()) {
             // we are in batch mode, do not re-emit watermark until we flip
-            if (mark.getTimestamp() >= backfillWatermark) {
+            if (mark.getTimestamp() == Watermark.MAX_WATERMARK.getTimestamp()) {
+                // We've reached the end of the stream, emit and forward watermark
                 emitStateAndSwitchToStreaming();
                 super.processWatermark(mark);
             }

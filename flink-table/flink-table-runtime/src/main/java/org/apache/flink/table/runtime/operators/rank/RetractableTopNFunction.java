@@ -97,9 +97,9 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
     private final ComparableRecordComparator serializableComparator;
 
     /** timestamp of backfill watermark barrier */
-    private final Watermark backfillWatermark;
     private boolean isStreamMode = true;
     private long count = 0;
+    private boolean isBatchBackfillEnabled = false;
 
     public RetractableTopNFunction(
             StateTtlConfig ttlConfig,
@@ -111,7 +111,7 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
             GeneratedRecordEqualiser generatedEqualiser,
             boolean generateUpdateBefore,
             boolean outputRankNumber,
-            long backfillWatermark) {
+            boolean isBatchBackfillEnabled) {
         super(
                 ttlConfig,
                 inputRowType,
@@ -126,7 +126,7 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
         this.inputRowSerializer = new RowDataStringSerializer(this.inputRowType);
         this.serializableComparator = comparableRecordComparator;
         this.generatedEqualiser = generatedEqualiser;
-        this.backfillWatermark = new Watermark(backfillWatermark);
+        this.isBatchBackfillEnabled = isBatchBackfillEnabled;
     }
 
     @Override
@@ -154,14 +154,12 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
         }
         treeMap = getRuntimeContext().getState(valueStateDescriptor);
 
-        if (backfillWatermark == null || backfillWatermark.getTimestamp() <= 0) {
-            this.isStreamMode = true;
-            LOG.info("Initializing batch capable {} in stream mode since no backfill watermark is specified",
-                    getPrintableName());
-        } else {
+        if (isBatchBackfillEnabled) {
             this.isStreamMode = false;
-            LOG.info("Initializing batch capable {} in Batch mode with backfill watermark {}",
-                    getPrintableName(), this.backfillWatermark);
+            LOG.info("Initializing batch capable {} in BATCH mode", getPrintableName());
+        } else {
+            this.isStreamMode = true;
+            LOG.info("Initializing batch capable {} in STREAMING mode", getPrintableName());
         }
     }
 
@@ -176,10 +174,6 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
 
     private String getPrintableName() {
         return getRuntimeContext().getJobId() + " " + getRuntimeContext().getTaskName();
-    }
-
-    public Watermark getBackfillWatermark() {
-        return backfillWatermark;
     }
 
     public void emitStateAndSwitchToStreaming(Context ctx, Collector<RowData> out,

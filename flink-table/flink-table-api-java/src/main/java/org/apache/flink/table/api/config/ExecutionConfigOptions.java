@@ -362,12 +362,11 @@ public class ExecutionConfigOptions {
     // Backfill Exec Options
     // ------------------------------------------------------------------------
     @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
-    public static final ConfigOption<Long> TABLE_EXEC_BATCH_BACKFILL_WATERMARK = key(
-            "table.exec.batch-backfill-watermark")
-            .longType()
-            .defaultValue(-1L)
-            .withDescription("The Source Watermark position to control when a hybrid Batch/Stream operator"
-                    + " switches from batch mode to streaming mode.");
+    public static final ConfigOption<Boolean> TABLE_EXEC_BATCH_BACKFILL = key(
+            "table.exec.batch-backfill")
+            .booleanType()
+            .defaultValue(false)
+            .withDescription("Use hybrid batch stream mode for backfill");
 
     // ------------------------------------------------------------------------
     // Other Exec Options
