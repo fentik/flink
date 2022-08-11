@@ -16,20 +16,23 @@ import java.io.Serializable;
 public class RowDataStringSerializer implements Serializable {
     private static final long serialVersionUID = 1L;
 
-    private final InternalTypeInfo<RowData> type;
+    private final RowType type;
 
     public RowDataStringSerializer(InternalTypeInfo<RowData> type) {
+        this.type = type.toRowType();
+    }
+
+    public RowDataStringSerializer(RowType type) {
         this.type = type;
     }
 
     public String asString(RowData row) {
-        RowType rowType = type.toRowType();
         LogicalType[] fieldTypes =
-        rowType.getFields().stream()
+        type.getFields().stream()
                 .map(RowType.RowField::getType)
                 .toArray(LogicalType[]::new);
-        String[] fieldNames = rowType.getFieldNames().toArray(new String[0]);
-        int rowArity = rowType.getFieldCount();
+        String[] fieldNames = type.getFieldNames().toArray(new String[0]);
+        int rowArity = type.getFieldCount();
         String rowString = "";
         for (int i = 0; i < rowArity; i++) {
             String value = "";
