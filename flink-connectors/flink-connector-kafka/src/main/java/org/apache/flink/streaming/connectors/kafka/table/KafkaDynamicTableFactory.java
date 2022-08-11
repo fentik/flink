@@ -95,6 +95,8 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.validateTableSinkOptions;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.validateTableSourceOptions;
 
+import org.apache.flink.table.api.config.ExecutionConfigOptions;
+
 /**
  * Factory for creating configured instances of {@link KafkaDynamicSource} and
  * {@link
@@ -178,6 +180,11 @@ public class KafkaDynamicTableFactory
 
         final ReadableConfig tableOptions = helper.getOptions();
 
+        final boolean isBatchBackfillEnabled = context.getConfiguration()
+                .get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL);
+
+        LOG.info("HERE configuration option {}", isBatchBackfillEnabled);
+
         validateTableSourceOptions(tableOptions);
 
         validatePKConstraints(
@@ -219,6 +226,7 @@ public class KafkaDynamicTableFactory
                 startupOptions.specificOffsets,
                 startupOptions.startupTimestampMillis,
                 getSourceParallelism(tableOptions),
+                isBatchBackfillEnabled,
                 context.getObjectIdentifier().asSummaryString());
     }
 
@@ -375,6 +383,7 @@ public class KafkaDynamicTableFactory
             Map<KafkaTopicPartition, Long> specificStartupOffsets,
             long startupTimestampMillis,
             int sourceParallelism,
+            boolean isBatchBackfillEnabled,
             String tableIdentifier) {
         return new KafkaDynamicSource(
                 physicalDataType,
@@ -391,6 +400,7 @@ public class KafkaDynamicTableFactory
                 startupTimestampMillis,
                 false,
                 sourceParallelism,
+                isBatchBackfillEnabled,
                 tableIdentifier);
     }
 
