@@ -217,7 +217,7 @@ public class StreamExecRank extends ExecNodeBase<RowData>
         long cacheSize = config.get(TABLE_EXEC_RANK_TOPN_CACHE_SIZE);
         StateTtlConfig ttlConfig = StateConfigUtil.createTtlConfig(config.getStateRetentionTime());
 
-        final long backfillWatermark = config.get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL_WATERMARK);
+        final boolean isBatchBackfillEnabled = config.get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL);
 
         AbstractTopNFunction processFunction;
         if (rankStrategy instanceof RankProcessStrategy.AppendFastStrategy) {
@@ -318,7 +318,7 @@ public class StreamExecRank extends ExecNodeBase<RowData>
                             generatedEqualiser,
                             generateUpdateBefore,
                             outputRankNumber,
-                            backfillWatermark);
+                            isBatchBackfillEnabled);
         } else {
             throw new TableException(
                     String.format("rank strategy:%s is not supported.", rankStrategy));

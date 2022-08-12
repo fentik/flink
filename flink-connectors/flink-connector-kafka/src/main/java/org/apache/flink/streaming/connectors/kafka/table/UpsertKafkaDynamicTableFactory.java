@@ -71,6 +71,8 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getSourceTopicPattern;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getSourceTopics;
 
+import org.apache.flink.table.api.config.ExecutionConfigOptions;
+
 /** Upsert-Kafka factory. */
 public class UpsertKafkaDynamicTableFactory
         implements DynamicTableSourceFactory, DynamicTableSinkFactory {
@@ -127,6 +129,10 @@ public class UpsertKafkaDynamicTableFactory
         // always use earliest to keep data integrity
         StartupMode earliest = StartupMode.EARLIEST;
 
+	final boolean isBatchBackfillEnabled = context.getConfiguration()
+                .get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL);
+
+
         return new KafkaDynamicSource(
                 context.getPhysicalRowDataType(),
                 keyDecodingFormat,
@@ -142,6 +148,7 @@ public class UpsertKafkaDynamicTableFactory
                 0,
                 true,
                 -1 /* sourceParallelism */,
+		isBatchBackfillEnabled,
                 context.getObjectIdentifier().asSummaryString());
     }
 

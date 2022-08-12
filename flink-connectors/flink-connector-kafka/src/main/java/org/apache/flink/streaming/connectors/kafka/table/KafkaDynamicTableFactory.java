@@ -183,8 +183,6 @@ public class KafkaDynamicTableFactory
         final boolean isBatchBackfillEnabled = context.getConfiguration()
                 .get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL);
 
-        LOG.info("HERE configuration option {}", isBatchBackfillEnabled);
-
         validateTableSourceOptions(tableOptions);
 
         validatePKConstraints(

@@ -615,6 +615,7 @@ public class UpsertKafkaDynamicTableFactoryTest extends TestLogger {
                 0,
                 true,
                 -1 /* sourceParallelism */,
+		false, /* isBatchModeEnabled */
                 FactoryMocks.IDENTIFIER.asSummaryString());
     }
 

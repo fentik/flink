@@ -137,7 +137,6 @@ public final class DynamicSourceUtils {
         }
 
         // 4. push watermark assigner
-	LOG.info("PLANNER in the codebase for watermark assigner test isBatchMode = {}, schema.getWatermarkSpecs().isEmpty() = {}", isBatchMode, schema.getWatermarkSpecs().isEmpty());
         if (!isBatchMode && !schema.getWatermarkSpecs().isEmpty()) {
             pushWatermarkAssigner(relBuilder, schema);
         }
