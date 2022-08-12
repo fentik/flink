@@ -33,4 +33,3 @@ pushd /opt
 rm -f flink-1.15.0-rc1.tar.gz
 tar zcfh flink-1.15.0-rc1.tar.gz flink-1.15.0-rc1
 popd
-

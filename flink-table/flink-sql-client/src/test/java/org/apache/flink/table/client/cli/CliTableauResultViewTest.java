@@ -19,7 +19,6 @@
 package org.apache.flink.table.client.cli;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.api.common.time.Deadline;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.testutils.CommonTestUtils;
 import org.apache.flink.table.api.DataTypes;
@@ -45,7 +44,6 @@ import org.junit.Test;
 import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
-import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -82,7 +80,8 @@ public class CliTableauResultViewTest {
                         Column.physical("varchar", DataTypes.STRING()),
                         Column.physical("decimal(10, 5)", DataTypes.DECIMAL(10, 5)),
                         Column.physical(
-                                "timestamp", DataTypes.TIMESTAMP(6).bridgedTo(Timestamp.class)));
+                                "timestamp", DataTypes.TIMESTAMP(6).bridgedTo(Timestamp.class)),
+                        Column.physical("binary", DataTypes.BYTES()));
         rowDataToStringConverter = new RowDataToStringConverterImpl(schema.toPhysicalRowDataType());
 
         List<Row> rows =
@@ -94,7 +93,8 @@ public class CliTableauResultViewTest {
                                 2L,
                                 "abc",
                                 BigDecimal.valueOf(1.23),
-                                Timestamp.valueOf("2020-03-01 18:39:14")),
+                                Timestamp.valueOf("2020-03-01 18:39:14"),
+                                new byte[] {50, 51, 52, -123, 54, 93, 115, 126}),
                         Row.ofKind(
                                 RowKind.UPDATE_BEFORE,
                                 false,
@@ -102,7 +102,8 @@ public class CliTableauResultViewTest {
                                 0L,
                                 "",
                                 BigDecimal.valueOf(1),
-                                Timestamp.valueOf("2020-03-01 18:39:14.1")),
+                                Timestamp.valueOf("2020-03-01 18:39:14.1"),
+                                new byte[] {100, -98, 32, 121, -125}),
                         Row.ofKind(
                                 RowKind.UPDATE_AFTER,
                                 true,
@@ -110,7 +111,8 @@ public class CliTableauResultViewTest {
                                 null,
                                 "abcdefg",
                                 BigDecimal.valueOf(12345),
-                                Timestamp.valueOf("2020-03-01 18:39:14.12")),
+                                Timestamp.valueOf("2020-03-01 18:39:14.12"),
+                                new byte[] {-110, -23, 1, 2}),
                         Row.ofKind(
                                 RowKind.DELETE,
                                 false,
@@ -118,7 +120,8 @@ public class CliTableauResultViewTest {
                                 Long.MAX_VALUE,
                                 null,
                                 BigDecimal.valueOf(12345.06789),
-                                Timestamp.valueOf("2020-03-01 18:39:14.123")),
+                                Timestamp.valueOf("2020-03-01 18:39:14.123"),
+                                new byte[] {50, 51, 52, -123, 54, 93, 115, 126}),
                         Row.ofKind(
                                 RowKind.INSERT,
                                 true,
@@ -126,7 +129,8 @@ public class CliTableauResultViewTest {
                                 Long.MIN_VALUE,
                                 "abcdefg111",
                                 null,
-                                Timestamp.valueOf("2020-03-01 18:39:14.123456")),
+                                Timestamp.valueOf("2020-03-01 18:39:14.123456"),
+                                new byte[] {110, 23, -1, -2}),
                         Row.ofKind(
                                 RowKind.DELETE,
                                 null,
@@ -134,6 +138,7 @@ public class CliTableauResultViewTest {
                                 -1L,
                                 "abcdefghijklmnopqrstuvwxyz",
                                 BigDecimal.valueOf(-12345.06789),
+                                null,
                                 null),
                         Row.ofKind(
                                 RowKind.INSERT,
@@ -142,7 +147,8 @@ public class CliTableauResultViewTest {
                                 -1L,
                                 "这是一段中文",
                                 BigDecimal.valueOf(-12345.06789),
-                                Timestamp.valueOf("2020-03-04 18:39:14")),
+                                Timestamp.valueOf("2020-03-04 18:39:14"),
+                                new byte[] {-3, -2, -1, 0, 1, 2, 3}),
                         Row.ofKind(
                                 RowKind.DELETE,
                                 null,
@@ -150,7 +156,8 @@ public class CliTableauResultViewTest {
                                 -1L,
                                 "これは日本語をテストするための文です",
                                 BigDecimal.valueOf(-12345.06789),
-                                Timestamp.valueOf("2020-03-04 18:39:14")));
+                                Timestamp.valueOf("2020-03-04 18:39:14"),
+                                new byte[] {-3, -2, -1, 0, 1, 2, 3}));
 
         final DataStructureConverter<Object, Object> dataStructureConverter =
                 DataStructureConverters.getConverter(schema.toPhysicalRowDataType());
@@ -189,29 +196,29 @@ public class CliTableauResultViewTest {
         view.displayResults();
         view.close();
         Assert.assertEquals(
-                "+---------+-------------+----------------------+--------------------------------+----------------+----------------------------+"
+                "+---------+-------------+----------------------+--------------------------------+----------------+----------------------------+---------------------+"
                         + System.lineSeparator()
-                        + "| boolean |         int |               bigint |                        varchar | decimal(10, 5) |                  timestamp |"
+                        + "| boolean |         int |               bigint |                        varchar | decimal(10, 5) |                  timestamp |              binary |"
                         + System.lineSeparator()
-                        + "+---------+-------------+----------------------+--------------------------------+----------------+----------------------------+"
+                        + "+---------+-------------+----------------------+--------------------------------+----------------+----------------------------+---------------------+"
                         + System.lineSeparator()
-                        + "|  <NULL> |           1 |                    2 |                            abc |        1.23000 | 2020-03-01 18:39:14.000000 |"
+                        + "|  <NULL> |           1 |                    2 |                            abc |        1.23000 | 2020-03-01 18:39:14.000000 | x'32333485365d737e' |"
                         + System.lineSeparator()
-                        + "|   FALSE |      <NULL> |                    0 |                                |        1.00000 | 2020-03-01 18:39:14.100000 |"
+                        + "|   FALSE |      <NULL> |                    0 |                                |        1.00000 | 2020-03-01 18:39:14.100000 |       x'649e207983' |"
                         + System.lineSeparator()
-                        + "|    TRUE |  2147483647 |               <NULL> |                        abcdefg |    12345.00000 | 2020-03-01 18:39:14.120000 |"
+                        + "|    TRUE |  2147483647 |               <NULL> |                        abcdefg |    12345.00000 | 2020-03-01 18:39:14.120000 |         x'92e90102' |"
                         + System.lineSeparator()
-                        + "|   FALSE | -2147483648 |  9223372036854775807 |                         <NULL> |    12345.06789 | 2020-03-01 18:39:14.123000 |"
+                        + "|   FALSE | -2147483648 |  9223372036854775807 |                         <NULL> |    12345.06789 | 2020-03-01 18:39:14.123000 | x'32333485365d737e' |"
                         + System.lineSeparator()
-                        + "|    TRUE |         100 | -9223372036854775808 |                     abcdefg111 |         <NULL> | 2020-03-01 18:39:14.123456 |"
+                        + "|    TRUE |         100 | -9223372036854775808 |                     abcdefg111 |         <NULL> | 2020-03-01 18:39:14.123456 |         x'6e17fffe' |"
                         + System.lineSeparator()
-                        + "|  <NULL> |          -1 |                   -1 |     abcdefghijklmnopqrstuvwxyz |   -12345.06789 |                     <NULL> |"
+                        + "|  <NULL> |          -1 |                   -1 |     abcdefghijklmnopqrstuvwxyz |   -12345.06789 |                     <NULL> |              <NULL> |"
                         + System.lineSeparator()
-                        + "|  <NULL> |          -1 |                   -1 |                   这是一段中文 |   -12345.06789 | 2020-03-04 18:39:14.000000 |"
+                        + "|  <NULL> |          -1 |                   -1 |                   这是一段中文 |   -12345.06789 | 2020-03-04 18:39:14.000000 |   x'fdfeff00010203' |"
                         + System.lineSeparator()
-                        + "|  <NULL> |          -1 |                   -1 |  これは日本語をテストするた... |   -12345.06789 | 2020-03-04 18:39:14.000000 |"
+                        + "|  <NULL> |          -1 |                   -1 |  これは日本語をテストするた... |   -12345.06789 | 2020-03-04 18:39:14.000000 |   x'fdfeff00010203' |"
                         + System.lineSeparator()
-                        + "+---------+-------------+----------------------+--------------------------------+----------------+----------------------------+"
+                        + "+---------+-------------+----------------------+--------------------------------+----------------+----------------------------+---------------------+"
                         + System.lineSeparator()
                         + "8 rows in set"
                         + System.lineSeparator(),
@@ -243,9 +250,7 @@ public class CliTableauResultViewTest {
 
         // wait until we trying to get batch result
         CommonTestUtils.waitUntilCondition(
-                () -> mockExecutor.getNumRetrieveResultChancesCalls() > 1,
-                Deadline.now().plus(Duration.ofSeconds(5)),
-                50L);
+                () -> mockExecutor.getNumRetrieveResultChancesCalls() > 1, 50L);
 
         // send signal to cancel
         terminal.raise(Terminal.Signal.INT);
@@ -354,29 +359,29 @@ public class CliTableauResultViewTest {
         // source file
         // by vim or just cat the file to check the regular result.
         Assert.assertEquals(
-                "+----+---------+-------------+----------------------+--------------------------------+----------------+----------------------------+"
+                "+----+---------+-------------+----------------------+--------------------------------+----------------+----------------------------+--------------------------------+"
                         + System.lineSeparator()
-                        + "| op | boolean |         int |               bigint |                        varchar | decimal(10, 5) |                  timestamp |"
+                        + "| op | boolean |         int |               bigint |                        varchar | decimal(10, 5) |                  timestamp |                         binary |"
                         + System.lineSeparator()
-                        + "+----+---------+-------------+----------------------+--------------------------------+----------------+----------------------------+"
+                        + "+----+---------+-------------+----------------------+--------------------------------+----------------+----------------------------+--------------------------------+"
                         + System.lineSeparator()
-                        + "| +I |  <NULL> |           1 |                    2 |                            abc |        1.23000 | 2020-03-01 18:39:14.000000 |"
+                        + "| +I |  <NULL> |           1 |                    2 |                            abc |        1.23000 | 2020-03-01 18:39:14.000000 |            x'32333485365d737e' |"
                         + System.lineSeparator()
-                        + "| -U |   FALSE |      <NULL> |                    0 |                                |        1.00000 | 2020-03-01 18:39:14.100000 |"
+                        + "| -U |   FALSE |      <NULL> |                    0 |                                |        1.00000 | 2020-03-01 18:39:14.100000 |                  x'649e207983' |"
                         + System.lineSeparator()
-                        + "| +U |    TRUE |  2147483647 |               <NULL> |                        abcdefg |    12345.00000 | 2020-03-01 18:39:14.120000 |"
+                        + "| +U |    TRUE |  2147483647 |               <NULL> |                        abcdefg |    12345.00000 | 2020-03-01 18:39:14.120000 |                    x'92e90102' |"
                         + System.lineSeparator()
-                        + "| -D |   FALSE | -2147483648 |  9223372036854775807 |                         <NULL> |    12345.06789 | 2020-03-01 18:39:14.123000 |"
+                        + "| -D |   FALSE | -2147483648 |  9223372036854775807 |                         <NULL> |    12345.06789 | 2020-03-01 18:39:14.123000 |            x'32333485365d737e' |"
                         + System.lineSeparator()
-                        + "| +I |    TRUE |         100 | -9223372036854775808 |                     abcdefg111 |         <NULL> | 2020-03-01 18:39:14.123456 |"
+                        + "| +I |    TRUE |         100 | -9223372036854775808 |                     abcdefg111 |         <NULL> | 2020-03-01 18:39:14.123456 |                    x'6e17fffe' |"
                         + System.lineSeparator()
-                        + "| -D |  <NULL> |          -1 |                   -1 |     abcdefghijklmnopqrstuvwxyz |   -12345.06789 |                     <NULL> |"
+                        + "| -D |  <NULL> |          -1 |                   -1 |     abcdefghijklmnopqrstuvwxyz |   -12345.06789 |                     <NULL> |                         <NULL> |"
                         + System.lineSeparator()
-                        + "| +I |  <NULL> |          -1 |                   -1 |                   这是一段中文 |   -12345.06789 | 2020-03-04 18:39:14.000000 |"
+                        + "| +I |  <NULL> |          -1 |                   -1 |                   这是一段中文 |   -12345.06789 | 2020-03-04 18:39:14.000000 |              x'fdfeff00010203' |"
                         + System.lineSeparator()
-                        + "| -D |  <NULL> |          -1 |                   -1 |  これは日本語をテストするた... |   -12345.06789 | 2020-03-04 18:39:14.000000 |"
+                        + "| -D |  <NULL> |          -1 |                   -1 |  これは日本語をテストするた... |   -12345.06789 | 2020-03-04 18:39:14.000000 |              x'fdfeff00010203' |"
                         + System.lineSeparator()
-                        + "+----+---------+-------------+----------------------+--------------------------------+----------------+----------------------------+"
+                        + "+----+---------+-------------+----------------------+--------------------------------+----------------+----------------------------+--------------------------------+"
                         + System.lineSeparator()
                         + "Received a total of 8 rows"
                         + System.lineSeparator(),
@@ -404,11 +409,11 @@ public class CliTableauResultViewTest {
         view.close();
 
         Assert.assertEquals(
-                "+----+---------+-------------+----------------------+--------------------------------+----------------+----------------------------+"
+                "+----+---------+-------------+----------------------+--------------------------------+----------------+----------------------------+--------------------------------+"
                         + System.lineSeparator()
-                        + "| op | boolean |         int |               bigint |                        varchar | decimal(10, 5) |                  timestamp |"
+                        + "| op | boolean |         int |               bigint |                        varchar | decimal(10, 5) |                  timestamp |                         binary |"
                         + System.lineSeparator()
-                        + "+----+---------+-------------+----------------------+--------------------------------+----------------+----------------------------+"
+                        + "+----+---------+-------------+----------------------+--------------------------------+----------------+----------------------------+--------------------------------+"
                         + System.lineSeparator()
                         + "Received a total of 0 row"
                         + System.lineSeparator(),
@@ -442,9 +447,7 @@ public class CliTableauResultViewTest {
 
         // wait until we processed first result
         CommonTestUtils.waitUntilCondition(
-                () -> mockExecutor.getNumRetrieveResultChancesCalls() > 1,
-                Deadline.now().plus(Duration.ofSeconds(5)),
-                50L);
+                () -> mockExecutor.getNumRetrieveResultChancesCalls() > 1, 50L);
 
         // send signal to cancel
         terminal.raise(Terminal.Signal.INT);
@@ -452,19 +455,19 @@ public class CliTableauResultViewTest {
         view.close();
 
         Assert.assertEquals(
-                "+----+---------+-------------+----------------------+--------------------------------+----------------+----------------------------+"
+                "+----+---------+-------------+----------------------+--------------------------------+----------------+----------------------------+--------------------------------+"
                         + System.lineSeparator()
-                        + "| op | boolean |         int |               bigint |                        varchar | decimal(10, 5) |                  timestamp |"
+                        + "| op | boolean |         int |               bigint |                        varchar | decimal(10, 5) |                  timestamp |                         binary |"
                         + System.lineSeparator()
-                        + "+----+---------+-------------+----------------------+--------------------------------+----------------+----------------------------+"
+                        + "+----+---------+-------------+----------------------+--------------------------------+----------------+----------------------------+--------------------------------+"
                         + System.lineSeparator()
-                        + "| +I |  <NULL> |           1 |                    2 |                            abc |        1.23000 | 2020-03-01 18:39:14.000000 |"
+                        + "| +I |  <NULL> |           1 |                    2 |                            abc |        1.23000 | 2020-03-01 18:39:14.000000 |            x'32333485365d737e' |"
                         + System.lineSeparator()
-                        + "| -U |   FALSE |      <NULL> |                    0 |                                |        1.00000 | 2020-03-01 18:39:14.100000 |"
+                        + "| -U |   FALSE |      <NULL> |                    0 |                                |        1.00000 | 2020-03-01 18:39:14.100000 |                  x'649e207983' |"
                         + System.lineSeparator()
-                        + "| +U |    TRUE |  2147483647 |               <NULL> |                        abcdefg |    12345.00000 | 2020-03-01 18:39:14.120000 |"
+                        + "| +U |    TRUE |  2147483647 |               <NULL> |                        abcdefg |    12345.00000 | 2020-03-01 18:39:14.120000 |                    x'92e90102' |"
                         + System.lineSeparator()
-                        + "| -D |   FALSE | -2147483648 |  9223372036854775807 |                         <NULL> |    12345.06789 | 2020-03-01 18:39:14.123000 |"
+                        + "| -D |   FALSE | -2147483648 |  9223372036854775807 |                         <NULL> |    12345.06789 | 2020-03-01 18:39:14.123000 |            x'32333485365d737e' |"
                         + System.lineSeparator()
                         + "Query terminated, received a total of 4 rows"
                         + System.lineSeparator(),
@@ -504,19 +507,19 @@ public class CliTableauResultViewTest {
         view.close();
 
         Assert.assertEquals(
-                "+----+---------+-------------+----------------------+--------------------------------+----------------+----------------------------+"
+                "+----+---------+-------------+----------------------+--------------------------------+----------------+----------------------------+--------------------------------+"
                         + System.lineSeparator()
-                        + "| op | boolean |         int |               bigint |                        varchar | decimal(10, 5) |                  timestamp |"
+                        + "| op | boolean |         int |               bigint |                        varchar | decimal(10, 5) |                  timestamp |                         binary |"
                         + System.lineSeparator()
-                        + "+----+---------+-------------+----------------------+--------------------------------+----------------+----------------------------+"
+                        + "+----+---------+-------------+----------------------+--------------------------------+----------------+----------------------------+--------------------------------+"
                         + System.lineSeparator()
-                        + "| +I |  <NULL> |           1 |                    2 |                            abc |        1.23000 | 2020-03-01 18:39:14.000000 |"
+                        + "| +I |  <NULL> |           1 |                    2 |                            abc |        1.23000 | 2020-03-01 18:39:14.000000 |            x'32333485365d737e' |"
                         + System.lineSeparator()
-                        + "| -U |   FALSE |      <NULL> |                    0 |                                |        1.00000 | 2020-03-01 18:39:14.100000 |"
+                        + "| -U |   FALSE |      <NULL> |                    0 |                                |        1.00000 | 2020-03-01 18:39:14.100000 |                  x'649e207983' |"
                         + System.lineSeparator()
-                        + "| +U |    TRUE |  2147483647 |               <NULL> |                        abcdefg |    12345.00000 | 2020-03-01 18:39:14.120000 |"
+                        + "| +U |    TRUE |  2147483647 |               <NULL> |                        abcdefg |    12345.00000 | 2020-03-01 18:39:14.120000 |                    x'92e90102' |"
                         + System.lineSeparator()
-                        + "| -D |   FALSE | -2147483648 |  9223372036854775807 |                         <NULL> |    12345.06789 | 2020-03-01 18:39:14.123000 |"
+                        + "| -D |   FALSE | -2147483648 |  9223372036854775807 |                         <NULL> |    12345.06789 | 2020-03-01 18:39:14.123000 |            x'32333485365d737e' |"
                         + System.lineSeparator(),
                 terminalOutput.toString());
         assertThat(mockExecutor.getNumCancelCalls(), is(1));
