@@ -18,6 +18,9 @@
 package org.apache.flink.streaming.api.operators;
 
 import org.apache.flink.annotation.Internal;
+//import org.apache.flink.api.common.eventtime.Watermark;
+import org.apache.flink.streaming.api.watermark.Watermark;
+import org.apache.flink.runtime.state.KeyedStateBackend;
 import org.apache.flink.runtime.state.VoidNamespace;
 import org.apache.flink.runtime.state.VoidNamespaceSerializer;
 import org.apache.flink.streaming.api.SimpleTimerService;
@@ -25,12 +28,16 @@ import org.apache.flink.streaming.api.TimeDomain;
 import org.apache.flink.streaming.api.TimerService;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.streaming.runtime.watermarkstatus.WatermarkStatus;
 import org.apache.flink.util.OutputTag;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 import static org.apache.flink.util.Preconditions.checkState;
 
-/** A {@link StreamOperator} for executing {@link KeyedProcessFunction KeyedProcessFunctions}. */
+/**
+ * A {@link StreamOperator} for executing {@link KeyedProcessFunction
+ * KeyedProcessFunctions}.
+ */
 @Internal
 public class KeyedProcessOperator<K, IN, OUT>
         extends AbstractUdfStreamOperator<OUT, KeyedProcessFunction<K, IN, OUT>>
@@ -55,8 +62,8 @@ public class KeyedProcessOperator<K, IN, OUT>
         super.open();
         collector = new TimestampedCollector<>(output);
 
-        InternalTimerService<VoidNamespace> internalTimerService =
-                getInternalTimerService("user-timers", VoidNamespaceSerializer.INSTANCE, this);
+        InternalTimerService<VoidNamespace> internalTimerService = getInternalTimerService("user-timers",
+                VoidNamespaceSerializer.INSTANCE, this);
 
         TimerService timerService = new SimpleTimerService(internalTimerService);
 
@@ -82,6 +89,26 @@ public class KeyedProcessOperator<K, IN, OUT>
         context.element = element;
         userFunction.processElement(element.getValue(), context, collector);
         context.element = null;
+    }
+
+    private String getPrintableName() {
+        return this.getOperatorID() + " " + this.getOperatorName();
+    }
+
+    public void processWatermark(Watermark mark) throws Exception {
+        LOG.info("WATERMARK isBatchCapable = {} isBatchMode = {} {} {}", userFunction.isHybridStreamBatchCapable(),
+                userFunction.isBatchMode(), getPrintableName(), mark);
+
+        if (userFunction.isBatchMode()) {
+            // we are in batch mode, do not re-emit watermark until we flip
+            if (mark.getTimestamp() >= userFunction.getBackfillWatermark().getTimestamp()) {
+                userFunction.emitStateAndSwitchToStreaming(context, collector, getKeyedStateBackend());
+                super.processWatermark(mark);
+            }
+        } else {
+            // We are in streaming mode, default to standard watermark processing code
+            super.processWatermark(mark);
+        }
     }
 
     private void invokeUserFunction(TimeDomain timeDomain, InternalTimer<K, VoidNamespace> timer)

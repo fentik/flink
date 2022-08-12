@@ -21,8 +21,11 @@ package org.apache.flink.table.runtime.operators.aggregate;
 import org.apache.flink.api.common.state.StateTtlConfig;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
+import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
+import org.apache.flink.streaming.runtime.watermarkstatus.WatermarkStatus;
+import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.utils.JoinedRowData;
 import org.apache.flink.table.runtime.dataview.PerKeyStateDataViewStore;
@@ -34,15 +37,30 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Collector;
+import org.apache.flink.api.common.eventtime.Watermark;
+import org.apache.flink.api.common.state.MapState;
+import org.apache.flink.api.common.state.State;
+
+import org.apache.flink.runtime.state.VoidNamespace;
+import org.apache.flink.runtime.state.VoidNamespaceSerializer;
 
 import static org.apache.flink.table.data.util.RowDataUtil.isAccumulateMsg;
 import static org.apache.flink.table.data.util.RowDataUtil.isRetractMsg;
 import static org.apache.flink.table.runtime.util.StateConfigUtil.createTtlConfig;
 
+import org.apache.flink.runtime.state.KeyedStateBackend;
+import org.apache.flink.runtime.state.KeyedStateFunction;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.Iterator;
+
 /** Aggregate Function used for the groupby (without window) aggregate. */
 public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, RowData> {
 
     private static final long serialVersionUID = -4767158666069797704L;
+
+    private static final Logger LOG = LoggerFactory.getLogger(GroupAggFunction.class);
 
     /** The code generated function used to handle aggregates. */
     private final GeneratedAggsHandleFunction genAggsHandler;
@@ -62,6 +80,8 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
     /** State idle retention time which unit is MILLISECONDS. */
     private final long stateRetentionTime;
 
+    private PerKeyStateDataViewStore dataViewStore = null;
+
     /** Reused output row. */
     private transient JoinedRowData resultRow = null;
 
@@ -74,17 +94,28 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
     // stores the accumulators
     private transient ValueState<RowData> accState = null;
 
+    private boolean isStreamMode = true;
+    private boolean isBatchBackfillEnabled = false;
+
+    KeyedStateBackend<RowData> lastBe;
+
     /**
      * Creates a {@link GroupAggFunction}.
      *
-     * @param genAggsHandler The code generated function used to handle aggregates.
-     * @param genRecordEqualiser The code generated equaliser used to equal RowData.
-     * @param accTypes The accumulator types.
-     * @param indexOfCountStar The index of COUNT(*) in the aggregates. -1 when the input doesn't
-     *     contain COUNT(*), i.e. doesn't contain retraction messages. We make sure there is a
-     *     COUNT(*) if input stream contains retraction.
-     * @param generateUpdateBefore Whether this operator will generate UPDATE_BEFORE messages.
-     * @param stateRetentionTime state idle retention time which unit is MILLISECONDS.
+     * @param genAggsHandler       The code generated function used to handle
+     *                             aggregates.
+     * @param genRecordEqualiser   The code generated equaliser used to equal
+     *                             RowData.
+     * @param accTypes             The accumulator types.
+     * @param indexOfCountStar     The index of COUNT(*) in the aggregates. -1 when
+     *                             the input doesn't
+     *                             contain COUNT(*), i.e. doesn't contain retraction
+     *                             messages. We make sure there is a
+     *                             COUNT(*) if input stream contains retraction.
+     * @param generateUpdateBefore Whether this operator will generate UPDATE_BEFORE
+     *                             messages.
+     * @param stateRetentionTime   state idle retention time which unit is
+     *                             MILLISECONDS.
      */
     public GroupAggFunction(
             GeneratedAggsHandleFunction genAggsHandler,
@@ -92,13 +123,19 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
             LogicalType[] accTypes,
             int indexOfCountStar,
             boolean generateUpdateBefore,
-            long stateRetentionTime) {
+            long stateRetentionTime,
+            boolean isBatchBackfillEnabled) {
         this.genAggsHandler = genAggsHandler;
         this.genRecordEqualiser = genRecordEqualiser;
         this.accTypes = accTypes;
         this.recordCounter = RecordCounter.of(indexOfCountStar);
         this.generateUpdateBefore = generateUpdateBefore;
         this.stateRetentionTime = stateRetentionTime;
+        this.isBatchBackfillEnabled = isBatchBackfillEnabled;
+    }
+
+    private String getPrintableName() {
+        return getRuntimeContext().getJobId() + " " + getRuntimeContext().getTaskName();
     }
 
     @Override
@@ -107,7 +144,8 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
         // instantiate function
         StateTtlConfig ttlConfig = createTtlConfig(stateRetentionTime);
         function = genAggsHandler.newInstance(getRuntimeContext().getUserCodeClassLoader());
-        function.open(new PerKeyStateDataViewStore(getRuntimeContext(), ttlConfig));
+        dataViewStore = new PerKeyStateDataViewStore(getRuntimeContext(), ttlConfig);
+        function.open(dataViewStore);
         // instantiate equaliser
         equaliser = genRecordEqualiser.newInstance(getRuntimeContext().getUserCodeClassLoader());
 
@@ -119,6 +157,70 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
         accState = getRuntimeContext().getState(accDesc);
 
         resultRow = new JoinedRowData();
+
+        if (isBatchBackfillEnabled) {
+            this.isStreamMode = false;
+            LOG.info("Initializing batch capable {} in BATCH mode", getPrintableName());
+        } else {
+            this.isStreamMode = true;
+            LOG.info("Initializing batch capable {} in STREAMING mode", getPrintableName());
+        }
+    }
+
+    public boolean isBatchMode() {
+        return !this.isStreamMode;
+    }
+
+    public void emitStateAndSwitchToStreaming(Context ctx, Collector<RowData> out,
+            KeyedStateBackend<RowData> be) {
+        if (isStreamMode) {
+            LOG.warn("Programming error in {} -- asked to switch to streaming while not in batch mode",
+                    getPrintableName());
+            return;
+        }
+
+        LOG.info("{} transitioning from Batch to Stream mode", getPrintableName());
+        InternalTypeInfo<RowData> accTypeInfo = InternalTypeInfo.ofFields(accTypes);
+        ValueStateDescriptor<RowData> accDesc = new ValueStateDescriptor<>("accState", accTypeInfo);
+
+        class Counter {
+            public long count = 0;
+
+            Counter() {
+            }
+        }
+
+        Counter counter = new Counter();
+
+        try {
+            be.applyToAllKeys(VoidNamespace.INSTANCE, VoidNamespaceSerializer.INSTANCE, accDesc,
+                    (key, state) -> {
+                        function.setAccumulators(state.value());
+                        resultRow.replace(key, function.getValue()).setRowKind(RowKind.INSERT);
+                        counter.count++;
+                        out.collect(resultRow);
+                    });
+        } catch (Exception e) {
+            LOG.info("Error transitioning to stream mode in {} exception e: {}", getPrintableName(),
+                    e.toString());
+        }
+
+        LOG.info("{} transitioned to Stream mode and emitted {} records", getPrintableName(),
+                counter.count);
+
+        isStreamMode = true;
+    }
+
+    @Override
+    public boolean isHybridStreamBatchCapable() {
+        return true;
+    }
+
+    private void collectIfNotBatch(Collector<RowData> out, RowData output) {
+        /* Supress emitting row if we're in batch mode */
+        if (isStreamMode) {
+            out.collect(output);
+        }
     }
 
     @Override
@@ -180,7 +282,7 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
                         resultRow
                                 .replace(currentKey, prevAggValue)
                                 .setRowKind(RowKind.UPDATE_BEFORE);
-                        out.collect(resultRow);
+                        collectIfNotBatch(out, resultRow);
                     }
                     // prepare UPDATE_AFTER message for new row
                     resultRow.replace(currentKey, newAggValue).setRowKind(RowKind.UPDATE_AFTER);
@@ -191,15 +293,14 @@ public class GroupAggFunction extends KeyedProcessFunction<RowData, RowData, Row
                 resultRow.replace(currentKey, newAggValue).setRowKind(RowKind.INSERT);
             }
 
-            out.collect(resultRow);
-
+            collectIfNotBatch(out, resultRow);
         } else {
             // we retracted the last record for this key
             // sent out a delete message
             if (!firstRow) {
                 // prepare delete message for previous row
                 resultRow.replace(currentKey, prevAggValue).setRowKind(RowKind.DELETE);
-                out.collect(resultRow);
+                collectIfNotBatch(out, resultRow);
             }
             // and clear all state
             accState.clear();

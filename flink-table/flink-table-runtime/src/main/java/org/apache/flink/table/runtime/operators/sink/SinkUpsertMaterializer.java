@@ -31,6 +31,8 @@ import org.apache.flink.table.runtime.generated.GeneratedRecordEqualiser;
 import org.apache.flink.table.runtime.generated.RecordEqualiser;
 import org.apache.flink.table.runtime.operators.TableStreamOperator;
 import org.apache.flink.types.RowKind;
+import org.apache.flink.util.ExceptionUtils;
+
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,9 +41,16 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
+import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.RowType;
+//import org.apache.flink.table.types.utils.TypeConversions;
+
 import static org.apache.flink.types.RowKind.DELETE;
 import static org.apache.flink.types.RowKind.INSERT;
 import static org.apache.flink.types.RowKind.UPDATE_AFTER;
+
+import org.apache.flink.table.runtime.util.RowDataStringSerializer;
 
 /**
  * An operator that maintains incoming records in state corresponding to the upsert keys and
@@ -68,8 +77,10 @@ public class SinkUpsertMaterializer extends TableStreamOperator<RowData>
     private final StateTtlConfig ttlConfig;
     private final TypeSerializer<RowData> serializer;
     private final GeneratedRecordEqualiser generatedEqualiser;
+    private final RowDataStringSerializer rowStringSerializer;
 
     private transient RecordEqualiser equaliser;
+
     // Buffer of emitted insertions on which deletions will be applied first.
     // The row kind might be +I or +U and will be ignored when applying the deletion.
     private transient ValueState<List<RowData>> state;
@@ -82,6 +93,21 @@ public class SinkUpsertMaterializer extends TableStreamOperator<RowData>
         this.ttlConfig = ttlConfig;
         this.serializer = serializer;
         this.generatedEqualiser = generatedEqualiser;
+        this.rowStringSerializer = null;
+        LOG.info("WARNING: SinkUpsertMaterializer is being called without the physicalRowType - This reduces what we can log for debugging. See the stacktrace to see if you can fix the caller.");
+        String stacktrace = ExceptionUtils.stringifyException((new Exception("Missing RowType information")));
+        LOG.info(stacktrace);
+    }
+
+    public SinkUpsertMaterializer(
+        StateTtlConfig ttlConfig,
+        TypeSerializer<RowData> serializer,
+        GeneratedRecordEqualiser generatedEqualiser,
+        RowType physicalRowType) {
+        this.ttlConfig = ttlConfig;
+        this.serializer = serializer;
+        this.generatedEqualiser = generatedEqualiser;
+        this.rowStringSerializer = new RowDataStringSerializer(physicalRowType);
     }
 
     @Override
@@ -98,6 +124,60 @@ public class SinkUpsertMaterializer extends TableStreamOperator<RowData>
         this.collector = new TimestampedCollector<>(output);
     }
 
+    // TODO(akhilg): This is an exact copy of a function in AbstractStreamingOperator. When you are getting
+    // bored, figure out which class/interface can be put this function in and re-use between these two classes.
+    protected static String rowToString(RowType type, RowData row) {
+        LogicalType[] fieldTypes =
+                type.getFields().stream()
+                        .map(RowType.RowField::getType)
+                        .toArray(LogicalType[]::new);
+        String[] fieldNames = type.getFieldNames().toArray(new String[0]);
+        int rowArity = type.getFieldCount();
+        String rowString = "";
+        for (int i = 0; i < rowArity; i++) {
+            String value = "";
+            if (row.isNullAt(i)) {
+                value = "<NULL>";
+            } else {
+                switch (fieldTypes[i].getTypeRoot()) {
+                        case NULL:
+                            value = "<NULL>";
+                            break;
+
+                        case BOOLEAN:
+                            value = row.getBoolean(i) ? "True" : "False";
+                            break;
+
+                        case INTEGER:
+                        case INTERVAL_YEAR_MONTH:
+                            value = Integer.toString(row.getInt(i));
+                            break;
+
+                        case BIGINT:
+                        case INTERVAL_DAY_TIME:
+                            value = Long.toString(row.getLong(i));
+                            break;
+
+                        case CHAR:
+                        case VARCHAR:
+                            value = row.getString(i).toString();
+                            break;
+
+                        case DATE:
+                            value = "[DATE TYPE]";
+                            break;
+
+                        default:
+                            value = "[Unprocessed type]";
+                            break;
+                }
+            }
+            String field = fieldNames[i] + "=" + value;
+            rowString = rowString + field + (i == rowArity - 1 ? "" : ", ");
+        }
+        return rowString;
+    }
+
     @Override
     public void processElement(StreamRecord<RowData> element) throws Exception {
         final RowData row = element.getValue();
@@ -105,7 +185,14 @@ public class SinkUpsertMaterializer extends TableStreamOperator<RowData>
         if (values == null) {
             values = new ArrayList<>(2);
         }
-
+        if (this.shouldLogInput()) {
+            if (this.rowStringSerializer!= null) {
+                LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with "
+                    + values.size() + " values : " + rowStringSerializer.asString(row));
+            } else {
+                LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with " + values.size() + " values : " + element.toString());
+            }
+        }
         switch (row.getRowKind()) {
             case INSERT:
             case UPDATE_AFTER:

@@ -65,14 +65,15 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TRANSACTIONAL_ID_PREFIX;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FIELDS_INCLUDE;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SOURCE_PARALLELISM;
 import static org.apache.flink.table.factories.FactoryUtil.FORMAT;
 
 /** Utilities for {@link KafkaConnectorOptions}. */
 @Internal
 class KafkaConnectorOptionsUtil {
 
-    private static final ConfigOption<String> SCHEMA_REGISTRY_SUBJECT =
-            ConfigOptions.key("schema-registry.subject").stringType().noDefaultValue();
+    private static final ConfigOption<String> SCHEMA_REGISTRY_SUBJECT = ConfigOptions.key("schema-registry.subject")
+            .stringType().noDefaultValue();
 
     // --------------------------------------------------------------------------------------------
     // Option enumerations
@@ -91,8 +92,7 @@ class KafkaConnectorOptionsUtil {
     private static final String OFFSET = "offset";
     protected static final String AVRO_CONFLUENT = "avro-confluent";
     protected static final String DEBEZIUM_AVRO_CONFLUENT = "debezium-avro-confluent";
-    private static final List<String> SCHEMA_REGISTRY_FORMATS =
-            Arrays.asList(AVRO_CONFLUENT, DEBEZIUM_AVRO_CONFLUENT);
+    private static final List<String> SCHEMA_REGISTRY_FORMATS = Arrays.asList(AVRO_CONFLUENT, DEBEZIUM_AVRO_CONFLUENT);
 
     // --------------------------------------------------------------------------------------------
     // Validation
@@ -123,8 +123,7 @@ class KafkaConnectorOptionsUtil {
     }
 
     public static void validateSinkTopic(ReadableConfig tableOptions) {
-        String errorMessageTemp =
-                "Flink Kafka sink currently only supports single topic, but got %s: %s.";
+        String errorMessageTemp = "Flink Kafka sink currently only supports single topic, but got %s: %s.";
         if (!isSingleTopic(tableOptions)) {
             if (tableOptions.getOptional(TOPIC_PATTERN).isPresent()) {
                 throw new ValidationException(
@@ -173,8 +172,7 @@ class KafkaConnectorOptionsUtil {
                                         throw new ValidationException(
                                                 "Currently Kafka source only supports specific offset for single topic.");
                                     }
-                                    String specificOffsets =
-                                            tableOptions.get(SCAN_STARTUP_SPECIFIC_OFFSETS);
+                                    String specificOffsets = tableOptions.get(SCAN_STARTUP_SPECIFIC_OFFSETS);
                                     parseSpecificOffsets(
                                             specificOffsets, SCAN_STARTUP_SPECIFIC_OFFSETS.key());
 
@@ -209,6 +207,10 @@ class KafkaConnectorOptionsUtil {
         return tableOptions.getOptional(TOPIC).orElse(null);
     }
 
+    public static int getSourceParallelism(ReadableConfig tableOptions) {
+        return tableOptions.getOptional(SOURCE_PARALLELISM).orElse(-1);
+    }
+
     public static Pattern getSourceTopicPattern(ReadableConfig tableOptions) {
         return tableOptions.getOptional(TOPIC_PATTERN).map(Pattern::compile).orElse(null);
     }
@@ -220,14 +222,14 @@ class KafkaConnectorOptionsUtil {
 
     public static StartupOptions getStartupOptions(ReadableConfig tableOptions) {
         final Map<KafkaTopicPartition, Long> specificOffsets = new HashMap<>();
-        final StartupMode startupMode =
-                tableOptions
-                        .getOptional(SCAN_STARTUP_MODE)
-                        .map(KafkaConnectorOptionsUtil::fromOption)
-                        .orElse(StartupMode.GROUP_OFFSETS);
+        final StartupMode startupMode = tableOptions
+                .getOptional(SCAN_STARTUP_MODE)
+                .map(KafkaConnectorOptionsUtil::fromOption)
+                .orElse(StartupMode.GROUP_OFFSETS);
         if (startupMode == StartupMode.SPECIFIC_OFFSETS) {
             // It will be refactored after support specific offset for multiple topics in
-            // FLINK-18602. We have already checked tableOptions.get(TOPIC) contains one topic in
+            // FLINK-18602. We have already checked tableOptions.get(TOPIC) contains one
+            // topic in
             // validateScanStartupMode().
             buildSpecificOffsets(tableOptions, tableOptions.get(TOPIC).get(0), specificOffsets);
         }
@@ -246,18 +248,18 @@ class KafkaConnectorOptionsUtil {
             String topic,
             Map<KafkaTopicPartition, Long> specificOffsets) {
         String specificOffsetsStrOpt = tableOptions.get(SCAN_STARTUP_SPECIFIC_OFFSETS);
-        final Map<Integer, Long> offsetMap =
-                parseSpecificOffsets(specificOffsetsStrOpt, SCAN_STARTUP_SPECIFIC_OFFSETS.key());
+        final Map<Integer, Long> offsetMap = parseSpecificOffsets(specificOffsetsStrOpt,
+                SCAN_STARTUP_SPECIFIC_OFFSETS.key());
         offsetMap.forEach(
                 (partition, offset) -> {
-                    final KafkaTopicPartition topicPartition =
-                            new KafkaTopicPartition(topic, partition);
+                    final KafkaTopicPartition topicPartition = new KafkaTopicPartition(topic, partition);
                     specificOffsets.put(topicPartition, offset);
                 });
     }
 
     /**
-     * Returns the {@link StartupMode} of Kafka Consumer by passed-in table-specific {@link
+     * Returns the {@link StartupMode} of Kafka Consumer by passed-in table-specific
+     * {@link
      * ScanStartupMode}.
      */
     private static StartupMode fromOption(ScanStartupMode scanStartupMode) {
@@ -296,7 +298,8 @@ class KafkaConnectorOptionsUtil {
     }
 
     /**
-     * The partitioner can be either "fixed", "round-robin" or a customized partitioner full class
+     * The partitioner can be either "fixed", "round-robin" or a customized
+     * partitioner full class
      * name.
      */
     public static Optional<FlinkKafkaPartitioner<RowData>> getFlinkKafkaPartitioner(
@@ -311,7 +314,7 @@ class KafkaConnectorOptionsUtil {
                                 case SINK_PARTITIONER_VALUE_DEFAULT:
                                 case SINK_PARTITIONER_VALUE_ROUND_ROBIN:
                                     return Optional.empty();
-                                    // Default fallback to full class name of the partitioner.
+                                // Default fallback to full class name of the partitioner.
                                 default:
                                     return Optional.of(
                                             initializePartitioner(partitioner, classLoader));
@@ -322,23 +325,24 @@ class KafkaConnectorOptionsUtil {
     /**
      * Parses SpecificOffsets String to Map.
      *
-     * <p>SpecificOffsets String format was given as following:
+     * <p>
+     * SpecificOffsets String format was given as following:
      *
      * <pre>
      *     scan.startup.specific-offsets = partition:0,offset:42;partition:1,offset:300
      * </pre>
      *
-     * @return SpecificOffsets with Map format, key is partition, and value is offset
+     * @return SpecificOffsets with Map format, key is partition, and value is
+     *         offset
      */
     public static Map<Integer, Long> parseSpecificOffsets(
             String specificOffsetsStr, String optionKey) {
         final Map<Integer, Long> offsetMap = new HashMap<>();
         final String[] pairs = specificOffsetsStr.split(";");
-        final String validationExceptionMessage =
-                String.format(
-                        "Invalid properties '%s' should follow the format "
-                                + "'partition:0,offset:42;partition:1,offset:300', but is '%s'.",
-                        optionKey, specificOffsetsStr);
+        final String validationExceptionMessage = String.format(
+                "Invalid properties '%s' should follow the format "
+                        + "'partition:0,offset:42;partition:1,offset:300', but is '%s'.",
+                optionKey, specificOffsetsStr);
 
         if (pairs.length == 0) {
             throw new ValidationException(validationExceptionMessage);
@@ -370,7 +374,8 @@ class KafkaConnectorOptionsUtil {
     }
 
     /**
-     * Decides if the table options contains Kafka client properties that start with prefix
+     * Decides if the table options contains Kafka client properties that start with
+     * prefix
      * 'properties'.
      */
     private static boolean hasKafkaClientProperties(Map<String, String> tableOptions) {
@@ -389,8 +394,8 @@ class KafkaConnectorOptionsUtil {
                                 name, FlinkKafkaPartitioner.class.getName()));
             }
             @SuppressWarnings("unchecked")
-            final FlinkKafkaPartitioner<T> kafkaPartitioner =
-                    InstantiationUtil.instantiate(name, FlinkKafkaPartitioner.class, classLoader);
+            final FlinkKafkaPartitioner<T> kafkaPartitioner = InstantiationUtil.instantiate(name,
+                    FlinkKafkaPartitioner.class, classLoader);
 
             return kafkaPartitioner;
         } catch (ClassNotFoundException | FlinkException e) {
@@ -401,10 +406,14 @@ class KafkaConnectorOptionsUtil {
     }
 
     /**
-     * Creates an array of indices that determine which physical fields of the table schema to
-     * include in the key format and the order that those fields have in the key format.
+     * Creates an array of indices that determine which physical fields of the table
+     * schema to
+     * include in the key format and the order that those fields have in the key
+     * format.
      *
-     * <p>See {@link KafkaConnectorOptions#KEY_FORMAT}, {@link KafkaConnectorOptions#KEY_FIELDS},
+     * <p>
+     * See {@link KafkaConnectorOptions#KEY_FORMAT},
+     * {@link KafkaConnectorOptions#KEY_FIELDS},
      * and {@link KafkaConnectorOptions#KEY_FIELDS_PREFIX} for more information.
      */
     public static int[] createKeyFormatProjection(
@@ -467,10 +476,12 @@ class KafkaConnectorOptionsUtil {
     }
 
     /**
-     * Creates an array of indices that determine which physical fields of the table schema to
+     * Creates an array of indices that determine which physical fields of the table
+     * schema to
      * include in the value format.
      *
-     * <p>See {@link KafkaConnectorOptions#VALUE_FORMAT}, {@link
+     * <p>
+     * See {@link KafkaConnectorOptions#VALUE_FORMAT}, {@link
      * KafkaConnectorOptions#VALUE_FIELDS_INCLUDE}, and {@link
      * KafkaConnectorOptions#KEY_FIELDS_PREFIX} for more information.
      */
@@ -506,8 +517,10 @@ class KafkaConnectorOptionsUtil {
     }
 
     /**
-     * Returns a new table context with a default schema registry subject value in the options if
-     * the format is a schema registry format (e.g. 'avro-confluent') and the subject is not
+     * Returns a new table context with a default schema registry subject value in
+     * the options if
+     * the format is a schema registry format (e.g. 'avro-confluent') and the
+     * subject is not
      * defined.
      */
     public static DynamicTableFactory.Context autoCompleteSchemaRegistrySubject(
@@ -552,10 +565,9 @@ class KafkaConnectorOptionsUtil {
 
     private static void autoCompleteSubject(
             Configuration configuration, String format, String subject) {
-        ConfigOption<String> subjectOption =
-                ConfigOptions.key(format + "." + SCHEMA_REGISTRY_SUBJECT.key())
-                        .stringType()
-                        .noDefaultValue();
+        ConfigOption<String> subjectOption = ConfigOptions.key(format + "." + SCHEMA_REGISTRY_SUBJECT.key())
+                .stringType()
+                .noDefaultValue();
         if (!configuration.getOptional(subjectOption).isPresent()) {
             configuration.setString(subjectOption, subject);
         }
@@ -581,5 +593,6 @@ class KafkaConnectorOptionsUtil {
         public long startupTimestampMillis;
     }
 
-    private KafkaConnectorOptionsUtil() {}
+    private KafkaConnectorOptionsUtil() {
+    }
 }

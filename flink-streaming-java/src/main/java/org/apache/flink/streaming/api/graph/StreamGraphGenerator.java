@@ -102,29 +102,46 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 import static org.apache.flink.util.Preconditions.checkState;
 
 /**
- * A generator that generates a {@link StreamGraph} from a graph of {@link Transformation}s.
+ * A generator that generates a {@link StreamGraph} from a graph of
+ * {@link Transformation}s.
  *
- * <p>This traverses the tree of {@code Transformations} starting from the sinks. At each
- * transformation we recursively transform the inputs, then create a node in the {@code StreamGraph}
- * and add edges from the input Nodes to our newly created node. The transformation methods return
- * the IDs of the nodes in the StreamGraph that represent the input transformation. Several IDs can
+ * <p>
+ * This traverses the tree of {@code Transformations} starting from the sinks.
+ * At each
+ * transformation we recursively transform the inputs, then create a node in the
+ * {@code StreamGraph}
+ * and add edges from the input Nodes to our newly created node. The
+ * transformation methods return
+ * the IDs of the nodes in the StreamGraph that represent the input
+ * transformation. Several IDs can
  * be returned to be able to deal with feedback transformations and unions.
  *
- * <p>Partitioning, split/select and union don't create actual nodes in the {@code StreamGraph}. For
- * these, we create a virtual node in the {@code StreamGraph} that holds the specific property, i.e.
- * partitioning, selector and so on. When an edge is created from a virtual node to a downstream
- * node the {@code StreamGraph} resolved the id of the original node and creates an edge in the
+ * <p>
+ * Partitioning, split/select and union don't create actual nodes in the
+ * {@code StreamGraph}. For
+ * these, we create a virtual node in the {@code StreamGraph} that holds the
+ * specific property, i.e.
+ * partitioning, selector and so on. When an edge is created from a virtual node
+ * to a downstream
+ * node the {@code StreamGraph} resolved the id of the original node and creates
+ * an edge in the
  * graph with the desired property. For example, if you have this graph:
  *
  * <pre>
  *     Map-1 -&gt; HashPartition-2 -&gt; Map-3
  * </pre>
  *
- * <p>where the numbers represent transformation IDs. We first recurse all the way down. {@code
- * Map-1} is transformed, i.e. we create a {@code StreamNode} with ID 1. Then we transform the
- * {@code HashPartition}, for this, we create virtual node of ID 4 that holds the property {@code
- * HashPartition}. This transformation returns the ID 4. Then we transform the {@code Map-3}. We add
- * the edge {@code 4 -> 3}. The {@code StreamGraph} resolved the actual node with ID 1 and creates
+ * <p>
+ * where the numbers represent transformation IDs. We first recurse all the way
+ * down. {@code
+ * Map-1} is transformed, i.e. we create a {@code StreamNode} with ID 1. Then we
+ * transform the
+ * {@code HashPartition}, for this, we create virtual node of ID 4 that holds
+ * the property {@code
+ * HashPartition}. This transformation returns the ID 4. Then we transform the
+ * {@code Map-3}. We add
+ * the edge {@code 4 -> 3}. The {@code StreamGraph} resolved the actual node
+ * with ID 1 and creates
  * and edge {@code 1 -> 3} with the property HashPartition.
  */
 @Internal
@@ -132,11 +149,9 @@ public class StreamGraphGenerator {
 
     private static final Logger LOG = LoggerFactory.getLogger(StreamGraphGenerator.class);
 
-    public static final int DEFAULT_LOWER_BOUND_MAX_PARALLELISM =
-            KeyGroupRangeAssignment.DEFAULT_LOWER_BOUND_MAX_PARALLELISM;
+    public static final int DEFAULT_LOWER_BOUND_MAX_PARALLELISM = KeyGroupRangeAssignment.DEFAULT_LOWER_BOUND_MAX_PARALLELISM;
 
-    public static final TimeCharacteristic DEFAULT_TIME_CHARACTERISTIC =
-            TimeCharacteristic.ProcessingTime;
+    public static final TimeCharacteristic DEFAULT_TIME_CHARACTERISTIC = TimeCharacteristic.ProcessingTime;
 
     public static final String DEFAULT_STREAMING_JOB_NAME = "Flink Streaming Job";
 
@@ -152,7 +167,8 @@ public class StreamGraphGenerator {
 
     private final ReadableConfig configuration;
 
-    // Records the slot sharing groups and their corresponding fine-grained ResourceProfile
+    // Records the slot sharing groups and their corresponding fine-grained
+    // ResourceProfile
     private final Map<String, ResourceProfile> slotSharingGroupResources = new HashMap<>();
 
     private Path savepointDir;
@@ -165,8 +181,7 @@ public class StreamGraphGenerator {
 
     private boolean chaining = true;
 
-    private Collection<Tuple2<String, DistributedCache.DistributedCacheEntry>> userArtifacts =
-            Collections.emptyList();
+    private Collection<Tuple2<String, DistributedCache.DistributedCacheEntry>> userArtifacts = Collections.emptyList();
 
     private TimeCharacteristic timeCharacteristic = DEFAULT_TIME_CHARACTERISTIC;
 
@@ -177,15 +192,11 @@ public class StreamGraphGenerator {
     private boolean shouldExecuteInBatchMode;
 
     @SuppressWarnings("rawtypes")
-    private static final Map<
-                    Class<? extends Transformation>,
-                    TransformationTranslator<?, ? extends Transformation>>
-            translatorMap;
+    private static final Map<Class<? extends Transformation>, TransformationTranslator<?, ? extends Transformation>> translatorMap;
 
     static {
         @SuppressWarnings("rawtypes")
-        Map<Class<? extends Transformation>, TransformationTranslator<?, ? extends Transformation>>
-                tmp = new HashMap<>();
+        Map<Class<? extends Transformation>, TransformationTranslator<?, ? extends Transformation>> tmp = new HashMap<>();
         tmp.put(OneInputTransformation.class, new OneInputTransformationTranslator<>());
         tmp.put(TwoInputTransformation.class, new TwoInputTransformationTranslator<>());
         tmp.put(MultipleInputTransformation.class, new MultiInputTransformationTranslator<>());
@@ -218,7 +229,8 @@ public class StreamGraphGenerator {
 
     private StreamGraph streamGraph;
 
-    // Keep track of which Transforms we have already transformed, this is necessary because
+    // Keep track of which Transforms we have already transformed, this is necessary
+    // because
     // we have loops, i.e. feedback edges.
     private Map<Transformation<?>, Collection<Integer>> alreadyTransformed;
 
@@ -282,9 +294,13 @@ public class StreamGraphGenerator {
     /**
      * Specify fine-grained resource requirements for slot sharing groups.
      *
-     * <p>Note that a slot sharing group hints the scheduler that the grouped operators CAN be
-     * deployed into a shared slot. There's no guarantee that the scheduler always deploy the
-     * grouped operators together. In cases grouped operators are deployed into separate slots, the
+     * <p>
+     * Note that a slot sharing group hints the scheduler that the grouped operators
+     * CAN be
+     * deployed into a shared slot. There's no guarantee that the scheduler always
+     * deploy the
+     * grouped operators together. In cases grouped operators are deployed into
+     * separate slots, the
      * slot resources will be derived from the specified group requirements.
      */
     public StreamGraphGenerator setSlotSharingGroupResource(
@@ -307,6 +323,9 @@ public class StreamGraphGenerator {
         streamGraph.setEnableCheckpointsAfterTasksFinish(
                 configuration.get(
                         ExecutionCheckpointingOptions.ENABLE_CHECKPOINTS_AFTER_TASKS_FINISH));
+        streamGraph.setHoldBatchForSavepoint(
+                configuration.get(
+                        ExecutionCheckpointingOptions.HOLD_BATCH_FOR_SAVEPOINT));
         shouldExecuteInBatchMode = shouldExecuteInBatchMode();
         configureStreamGraph(streamGraph);
 
@@ -439,9 +458,11 @@ public class StreamGraphGenerator {
     }
 
     private void setFineGrainedGlobalStreamExchangeMode(StreamGraph graph) {
-        // There might be a resource deadlock when applying fine-grained resource management in
+        // There might be a resource deadlock when applying fine-grained resource
+        // management in
         // batch jobs with PIPELINE edges. Users need to trigger the
-        // fine-grained.shuffle-mode.all-blocking to convert all edges to BLOCKING before we fix
+        // fine-grained.shuffle-mode.all-blocking to convert all edges to BLOCKING
+        // before we fix
         // that issue.
         if (shouldExecuteInBatchMode && graph.hasFineGrainedResource()) {
             if (configuration.get(ClusterOptions.FINE_GRAINED_SHUFFLE_MODE_ALL_BLOCKING)) {
@@ -457,8 +478,7 @@ public class StreamGraphGenerator {
     }
 
     private boolean shouldExecuteInBatchMode() {
-        final RuntimeExecutionMode configuredMode =
-                configuration.get(ExecutionOptions.RUNTIME_MODE);
+        final RuntimeExecutionMode configuredMode = configuration.get(ExecutionOptions.RUNTIME_MODE);
 
         final boolean existsUnboundedSource = existsUnboundedSource();
 
@@ -480,10 +500,9 @@ public class StreamGraphGenerator {
     private boolean existsUnboundedSource() {
         return transformations.stream()
                 .anyMatch(
-                        transformation ->
-                                isUnboundedSource(transformation)
-                                        || transformation.getTransitivePredecessors().stream()
-                                                .anyMatch(this::isUnboundedSource));
+                        transformation -> isUnboundedSource(transformation)
+                                || transformation.getTransitivePredecessors().stream()
+                                        .anyMatch(this::isUnboundedSource));
     }
 
     private boolean isUnboundedSource(final Transformation<?> transformation) {
@@ -495,7 +514,9 @@ public class StreamGraphGenerator {
     /**
      * Transforms one {@code Transformation}.
      *
-     * <p>This checks whether we already transformed it and exits early in that case. If not it
+     * <p>
+     * This checks whether we already transformed it and exits early in that case.
+     * If not it
      * delegates to one of the transformation specific methods.
      */
     private Collection<Integer> transform(Transformation<?> transform) {
@@ -507,7 +528,8 @@ public class StreamGraphGenerator {
 
         if (transform.getMaxParallelism() <= 0) {
 
-            // if the max parallelism hasn't been set, then first use the job wide max parallelism
+            // if the max parallelism hasn't been set, then first use the job wide max
+            // parallelism
             // from the ExecutionConfig.
             int globalMaxParallelismFromConfig = executionConfig.getMaxParallelism();
             if (globalMaxParallelismFromConfig > 0) {
@@ -519,8 +541,8 @@ public class StreamGraphGenerator {
                 .getSlotSharingGroup()
                 .ifPresent(
                         slotSharingGroup -> {
-                            final ResourceSpec resourceSpec =
-                                    SlotSharingGroupUtils.extractResourceSpec(slotSharingGroup);
+                            final ResourceSpec resourceSpec = SlotSharingGroupUtils
+                                    .extractResourceSpec(slotSharingGroup);
                             if (!resourceSpec.equals(ResourceSpec.UNKNOWN)) {
                                 slotSharingGroupResources.compute(
                                         slotSharingGroup.getName(),
@@ -529,7 +551,7 @@ public class StreamGraphGenerator {
                                                 return ResourceProfile.fromResourceSpec(
                                                         resourceSpec, MemorySize.ZERO);
                                             } else if (!ResourceProfile.fromResourceSpec(
-                                                            resourceSpec, MemorySize.ZERO)
+                                                    resourceSpec, MemorySize.ZERO)
                                                     .equals(profile)) {
                                                 throw new IllegalArgumentException(
                                                         "The slot sharing group "
@@ -546,9 +568,8 @@ public class StreamGraphGenerator {
         transform.getOutputType();
 
         @SuppressWarnings("unchecked")
-        final TransformationTranslator<?, Transformation<?>> translator =
-                (TransformationTranslator<?, Transformation<?>>)
-                        translatorMap.get(transform.getClass());
+        final TransformationTranslator<?, Transformation<?>> translator = (TransformationTranslator<?, Transformation<?>>) translatorMap
+                .get(transform.getClass());
 
         Collection<Integer> transformedIds;
         if (translator != null) {
@@ -619,11 +640,16 @@ public class StreamGraphGenerator {
     /**
      * Transforms a {@code FeedbackTransformation}.
      *
-     * <p>This will recursively transform the input and the feedback edges. We return the
-     * concatenation of the input IDs and the feedback IDs so that downstream operations can be
+     * <p>
+     * This will recursively transform the input and the feedback edges. We return
+     * the
+     * concatenation of the input IDs and the feedback IDs so that downstream
+     * operations can be
      * wired to both.
      *
-     * <p>This is responsible for creating the IterationSource and IterationSink which are used to
+     * <p>
+     * This is responsible for creating the IterationSource and IterationSink which
+     * are used to
      * feed back the elements.
      */
     private <T> Collection<Integer> transformFeedback(FeedbackTransformation<T> iterate) {
@@ -659,16 +685,15 @@ public class StreamGraphGenerator {
         }
 
         // create the fake iteration source/sink pair
-        Tuple2<StreamNode, StreamNode> itSourceAndSink =
-                streamGraph.createIterationSourceAndSink(
-                        iterate.getId(),
-                        getNewIterationNodeId(),
-                        getNewIterationNodeId(),
-                        iterate.getWaitTime(),
-                        iterate.getParallelism(),
-                        iterate.getMaxParallelism(),
-                        iterate.getMinResources(),
-                        iterate.getPreferredResources());
+        Tuple2<StreamNode, StreamNode> itSourceAndSink = streamGraph.createIterationSourceAndSink(
+                iterate.getId(),
+                getNewIterationNodeId(),
+                getNewIterationNodeId(),
+                iterate.getWaitTime(),
+                iterate.getParallelism(),
+                iterate.getMaxParallelism(),
+                iterate.getMinResources(),
+                iterate.getPreferredResources());
 
         StreamNode itSource = itSourceAndSink.f0;
         StreamNode itSink = itSourceAndSink.f1;
@@ -685,11 +710,13 @@ public class StreamGraphGenerator {
                 null,
                 null);
 
-        // also add the feedback source ID to the result IDs, so that downstream operators will
+        // also add the feedback source ID to the result IDs, so that downstream
+        // operators will
         // add both as input
         resultIds.add(itSource.getId());
 
-        // at the iterate to the already-seen-set with the result IDs, so that we can transform
+        // at the iterate to the already-seen-set with the result IDs, so that we can
+        // transform
         // the feedback edges and let them stop when encountering the iterate node
         alreadyTransformed.put(iterate, resultIds);
 
@@ -719,11 +746,16 @@ public class StreamGraphGenerator {
     /**
      * Transforms a {@code CoFeedbackTransformation}.
      *
-     * <p>This will only transform feedback edges, the result of this transform will be wired to the
-     * second input of a Co-Transform. The original input is wired directly to the first input of
+     * <p>
+     * This will only transform feedback edges, the result of this transform will be
+     * wired to the
+     * second input of a Co-Transform. The original input is wired directly to the
+     * first input of
      * the downstream Co-Transform.
      *
-     * <p>This is responsible for creating the IterationSource and IterationSink which are used to
+     * <p>
+     * This is responsible for creating the IterationSource and IterationSink which
+     * are used to
      * feed back the elements.
      */
     private <F> Collection<Integer> transformCoFeedback(CoFeedbackTransformation<F> coIterate) {
@@ -738,22 +770,24 @@ public class StreamGraphGenerator {
                             + RuntimeExecutionMode.STREAMING.name());
         }
 
-        // For Co-Iteration we don't need to transform the input and wire the input to the
-        // head operator by returning the input IDs, the input is directly wired to the left
-        // input of the co-operation. This transform only needs to return the ids of the feedback
+        // For Co-Iteration we don't need to transform the input and wire the input to
+        // the
+        // head operator by returning the input IDs, the input is directly wired to the
+        // left
+        // input of the co-operation. This transform only needs to return the ids of the
+        // feedback
         // edges, since they need to be wired to the second input of the co-operation.
 
         // create the fake iteration source/sink pair
-        Tuple2<StreamNode, StreamNode> itSourceAndSink =
-                streamGraph.createIterationSourceAndSink(
-                        coIterate.getId(),
-                        getNewIterationNodeId(),
-                        getNewIterationNodeId(),
-                        coIterate.getWaitTime(),
-                        coIterate.getParallelism(),
-                        coIterate.getMaxParallelism(),
-                        coIterate.getMinResources(),
-                        coIterate.getPreferredResources());
+        Tuple2<StreamNode, StreamNode> itSourceAndSink = streamGraph.createIterationSourceAndSink(
+                coIterate.getId(),
+                getNewIterationNodeId(),
+                getNewIterationNodeId(),
+                coIterate.getWaitTime(),
+                coIterate.getParallelism(),
+                coIterate.getMaxParallelism(),
+                coIterate.getMinResources(),
+                coIterate.getPreferredResources());
 
         StreamNode itSource = itSourceAndSink.f0;
         StreamNode itSink = itSourceAndSink.f1;
@@ -772,7 +806,8 @@ public class StreamGraphGenerator {
 
         Collection<Integer> resultIds = Collections.singleton(itSource.getId());
 
-        // at the iterate to the already-seen-set with the result IDs, so that we can transform
+        // at the iterate to the already-seen-set with the result IDs, so that we can
+        // transform
         // the feedback edges and let them stop when encountering the iterate node
         alreadyTransformed.put(coIterate, resultIds);
 
@@ -808,17 +843,16 @@ public class StreamGraphGenerator {
             return alreadyTransformed.get(transform);
         }
 
-        final String slotSharingGroup =
-                determineSlotSharingGroup(
-                        transform.getSlotSharingGroup().isPresent()
-                                ? transform.getSlotSharingGroup().get().getName()
-                                : null,
-                        allInputIds.stream()
-                                .flatMap(Collection::stream)
-                                .collect(Collectors.toList()));
+        final String slotSharingGroup = determineSlotSharingGroup(
+                transform.getSlotSharingGroup().isPresent()
+                        ? transform.getSlotSharingGroup().get().getName()
+                        : null,
+                allInputIds.stream()
+                        .flatMap(Collection::stream)
+                        .collect(Collectors.toList()));
 
-        final TransformationTranslator.Context context =
-                new ContextImpl(this, streamGraph, slotSharingGroup, configuration);
+        final TransformationTranslator.Context context = new ContextImpl(this, streamGraph, slotSharingGroup,
+                configuration);
 
         return shouldExecuteInBatchMode
                 ? translator.translateForBatch(transform, context)
@@ -826,14 +860,18 @@ public class StreamGraphGenerator {
     }
 
     /**
-     * Returns a list of lists containing the ids of the nodes in the transformation graph that
-     * correspond to the provided transformations. Each transformation may have multiple nodes.
+     * Returns a list of lists containing the ids of the nodes in the transformation
+     * graph that
+     * correspond to the provided transformations. Each transformation may have
+     * multiple nodes.
      *
-     * <p>Parent transformations will be translated if they are not already translated.
+     * <p>
+     * Parent transformations will be translated if they are not already translated.
      *
      * @param parentTransformations the transformations whose node ids to return.
-     * @return the nodeIds per transformation or an empty list if the {@code parentTransformations}
-     *     are empty.
+     * @return the nodeIds per transformation or an empty list if the
+     *         {@code parentTransformations}
+     *         are empty.
      */
     private List<Collection<Integer>> getParentInputIds(
             @Nullable final Collection<Transformation<?>> parentTransformations) {
@@ -849,15 +887,19 @@ public class StreamGraphGenerator {
     }
 
     /**
-     * Determines the slot sharing group for an operation based on the slot sharing group set by the
+     * Determines the slot sharing group for an operation based on the slot sharing
+     * group set by the
      * user and the slot sharing groups of the inputs.
      *
-     * <p>If the user specifies a group name, this is taken as is. If nothing is specified and the
-     * input operations all have the same group name then this name is taken. Otherwise the default
+     * <p>
+     * If the user specifies a group name, this is taken as is. If nothing is
+     * specified and the
+     * input operations all have the same group name then this name is taken.
+     * Otherwise the default
      * group is chosen.
      *
      * @param specifiedGroup The group specified by the user.
-     * @param inputIds The IDs of the input operations.
+     * @param inputIds       The IDs of the input operations.
      */
     private String determineSlotSharingGroup(String specifiedGroup, Collection<Integer> inputIds) {
         if (specifiedGroup != null) {
@@ -905,8 +947,7 @@ public class StreamGraphGenerator {
         @Override
         public Collection<Integer> getStreamNodeIds(final Transformation<?> transformation) {
             checkNotNull(transformation);
-            final Collection<Integer> ids =
-                    streamGraphGenerator.alreadyTransformed.get(transformation);
+            final Collection<Integer> ids = streamGraphGenerator.alreadyTransformed.get(transformation);
             checkState(
                     ids != null,
                     "Parent transformation \"" + transformation + "\" has not been transformed.");

@@ -81,7 +81,8 @@ import java.util.Set;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /**
- * Class representing the streaming topology. It contains all the information necessary to build the
+ * Class representing the streaming topology. It contains all the information
+ * necessary to build the
  * jobgraph for the execution.
  */
 @Internal
@@ -101,24 +102,26 @@ public class StreamGraph implements Pipeline {
 
     private boolean chaining;
 
-    private Collection<Tuple2<String, DistributedCache.DistributedCacheEntry>> userArtifacts =
-            Collections.emptyList();
+    private Collection<Tuple2<String, DistributedCache.DistributedCacheEntry>> userArtifacts = Collections.emptyList();
 
     private TimeCharacteristic timeCharacteristic;
 
     private GlobalStreamExchangeMode globalExchangeMode;
 
     private boolean enableCheckpointsAfterTasksFinish;
+    private boolean holdBatchForSavepoint;
 
-    /** Flag to indicate whether to put all vertices into the same slot sharing group by default. */
+    /**
+     * Flag to indicate whether to put all vertices into the same slot sharing group
+     * by default.
+     */
     private boolean allVerticesInSameSlotSharingGroupByDefault = true;
 
     private Map<Integer, StreamNode> streamNodes;
     private Set<Integer> sources;
     private Set<Integer> sinks;
     private Map<Integer, Tuple2<Integer, OutputTag>> virtualSideOutputNodes;
-    private Map<Integer, Tuple3<Integer, StreamPartitioner<?>, StreamExchangeMode>>
-            virtualPartitionNodes;
+    private Map<Integer, Tuple3<Integer, StreamPartitioner<?>, StreamExchangeMode>> virtualPartitionNodes;
 
     protected Map<Integer, String> vertexIDtoBrokerID;
     protected Map<Integer, Long> vertexIDtoLoopTimeout;
@@ -130,8 +133,7 @@ public class StreamGraph implements Pipeline {
     private InternalTimeServiceManager.Provider timerServiceProvider;
     private JobType jobType = JobType.STREAMING;
     private Map<String, ResourceProfile> slotSharingGroupResources;
-    private PipelineOptions.VertexDescriptionMode descriptionMode =
-            PipelineOptions.VertexDescriptionMode.TREE;
+    private PipelineOptions.VertexDescriptionMode descriptionMode = PipelineOptions.VertexDescriptionMode.TREE;
     private boolean vertexNameIncludeIndexPrefix = false;
 
     public StreamGraph(
@@ -269,19 +271,21 @@ public class StreamGraph implements Pipeline {
     /**
      * Set whether to put all vertices into the same slot sharing group by default.
      *
-     * @param allVerticesInSameSlotSharingGroupByDefault indicates whether to put all vertices into
-     *     the same slot sharing group by default.
+     * @param allVerticesInSameSlotSharingGroupByDefault indicates whether to put
+     *                                                   all vertices into
+     *                                                   the same slot sharing group
+     *                                                   by default.
      */
     public void setAllVerticesInSameSlotSharingGroupByDefault(
             boolean allVerticesInSameSlotSharingGroupByDefault) {
-        this.allVerticesInSameSlotSharingGroupByDefault =
-                allVerticesInSameSlotSharingGroupByDefault;
+        this.allVerticesInSameSlotSharingGroupByDefault = allVerticesInSameSlotSharingGroupByDefault;
     }
 
     /**
      * Gets whether to put all vertices into the same slot sharing group by default.
      *
-     * @return whether to put all vertices into the same slot sharing group by default.
+     * @return whether to put all vertices into the same slot sharing group by
+     *         default.
      */
     public boolean isAllVerticesInSameSlotSharingGroupByDefault() {
         return allVerticesInSameSlotSharingGroupByDefault;
@@ -293,6 +297,14 @@ public class StreamGraph implements Pipeline {
 
     public void setEnableCheckpointsAfterTasksFinish(boolean enableCheckpointsAfterTasksFinish) {
         this.enableCheckpointsAfterTasksFinish = enableCheckpointsAfterTasksFinish;
+    }
+
+    public boolean isHoldBatchForSavepoint() {
+        return holdBatchForSavepoint;
+    }
+
+    public void setHoldBatchForSavepoint(boolean holdBatchForSavepoint) {
+        this.holdBatchForSavepoint = holdBatchForSavepoint;
     }
 
     // Checkpointing
@@ -375,10 +387,9 @@ public class StreamGraph implements Pipeline {
             TypeInformation<IN> inTypeInfo,
             TypeInformation<OUT> outTypeInfo,
             String operatorName) {
-        Class<? extends TaskInvokable> invokableClass =
-                operatorFactory.isStreamSource()
-                        ? SourceStreamTask.class
-                        : OneInputStreamTask.class;
+        Class<? extends TaskInvokable> invokableClass = operatorFactory.isStreamSource()
+                ? SourceStreamTask.class
+                : OneInputStreamTask.class;
         addOperator(
                 vertexID,
                 slotSharingGroup,
@@ -504,14 +515,13 @@ public class StreamGraph implements Pipeline {
             throw new RuntimeException("Duplicate vertexID " + vertexID);
         }
 
-        StreamNode vertex =
-                new StreamNode(
-                        vertexID,
-                        slotSharingGroup,
-                        coLocationGroup,
-                        operatorFactory,
-                        operatorName,
-                        vertexClass);
+        StreamNode vertex = new StreamNode(
+                vertexID,
+                slotSharingGroup,
+                coLocationGroup,
+                operatorFactory,
+                operatorName,
+                vertexClass);
 
         streamNodes.put(vertexID, vertex);
 
@@ -519,12 +529,13 @@ public class StreamGraph implements Pipeline {
     }
 
     /**
-     * Adds a new virtual node that is used to connect a downstream vertex to only the outputs with
+     * Adds a new virtual node that is used to connect a downstream vertex to only
+     * the outputs with
      * the selected side-output {@link OutputTag}.
      *
      * @param originalId ID of the node that should be connected to.
-     * @param virtualId ID of the virtual node.
-     * @param outputTag The selected side-output {@code OutputTag}.
+     * @param virtualId  ID of the virtual node.
+     * @param outputTag  The selected side-output {@code OutputTag}.
      */
     public void addVirtualSideOutputNode(
             Integer originalId, Integer virtualId, OutputTag outputTag) {
@@ -533,9 +544,12 @@ public class StreamGraph implements Pipeline {
             throw new IllegalStateException("Already has virtual output node with id " + virtualId);
         }
 
-        // verify that we don't already have a virtual node for the given originalId/outputTag
-        // combination with a different TypeInformation. This would indicate that someone is trying
-        // to read a side output from an operation with a different type for the same side output
+        // verify that we don't already have a virtual node for the given
+        // originalId/outputTag
+        // combination with a different TypeInformation. This would indicate that
+        // someone is trying
+        // to read a side output from an operation with a different type for the same
+        // side output
         // id.
 
         for (Tuple2<Integer, OutputTag> tag : virtualSideOutputNodes.values()) {
@@ -557,14 +571,17 @@ public class StreamGraph implements Pipeline {
     }
 
     /**
-     * Adds a new virtual node that is used to connect a downstream vertex to an input with a
+     * Adds a new virtual node that is used to connect a downstream vertex to an
+     * input with a
      * certain partitioning.
      *
-     * <p>When adding an edge from the virtual node to a downstream node the connection will be made
+     * <p>
+     * When adding an edge from the virtual node to a downstream node the connection
+     * will be made
      * to the original node, but with the partitioning given here.
      *
-     * @param originalId ID of the node that should be connected to.
-     * @param virtualId ID of the virtual node.
+     * @param originalId  ID of the node that should be connected to.
+     * @param virtualId   ID of the virtual node.
      * @param partitioner The partitioner
      */
     public void addVirtualPartitionNode(
@@ -665,14 +682,14 @@ public class StreamGraph implements Pipeline {
         StreamNode upstreamNode = getStreamNode(upStreamVertexID);
         StreamNode downstreamNode = getStreamNode(downStreamVertexID);
 
-        // If no partitioner was specified and the parallelism of upstream and downstream
+        // If no partitioner was specified and the parallelism of upstream and
+        // downstream
         // operator matches use forward partitioning, use rebalance otherwise.
         if (partitioner == null
                 && upstreamNode.getParallelism() == downstreamNode.getParallelism()) {
-            partitioner =
-                    executionConfig.isDynamicGraph()
-                            ? new ForwardForUnspecifiedPartitioner<>()
-                            : new ForwardPartitioner<>();
+            partitioner = executionConfig.isDynamicGraph()
+                    ? new ForwardForUnspecifiedPartitioner<>()
+                    : new ForwardPartitioner<>();
         } else if (partitioner == null) {
             partitioner = new RebalancePartitioner<Object>();
         }
@@ -698,22 +715,24 @@ public class StreamGraph implements Pipeline {
         }
 
         /**
-         * Just make sure that {@link StreamEdge} connecting same nodes (for example as a result of
-         * self unioning a {@link DataStream}) are distinct and unique. Otherwise it would be
-         * difficult on the {@link StreamTask} to assign {@link RecordWriter}s to correct {@link
+         * Just make sure that {@link StreamEdge} connecting same nodes (for example as
+         * a result of
+         * self unioning a {@link DataStream}) are distinct and unique. Otherwise it
+         * would be
+         * difficult on the {@link StreamTask} to assign {@link RecordWriter}s to
+         * correct {@link
          * StreamEdge}.
          */
         int uniqueId = getStreamEdges(upstreamNode.getId(), downstreamNode.getId()).size();
 
-        StreamEdge edge =
-                new StreamEdge(
-                        upstreamNode,
-                        downstreamNode,
-                        typeNumber,
-                        partitioner,
-                        outputTag,
-                        exchangeMode,
-                        uniqueId);
+        StreamEdge edge = new StreamEdge(
+                upstreamNode,
+                downstreamNode,
+                typeNumber,
+                partitioner,
+                outputTag,
+                exchangeMode,
+                uniqueId);
 
         getStreamNode(edge.getSourceId()).addOutEdge(edge);
         getStreamNode(edge.getTargetId()).addInEdge(edge);
@@ -908,27 +927,25 @@ public class StreamGraph implements Pipeline {
 
         final String coLocationGroup = "IterationCoLocationGroup-" + loopId;
 
-        StreamNode source =
-                this.addNode(
-                        sourceId,
-                        null,
-                        coLocationGroup,
-                        StreamIterationHead.class,
-                        null,
-                        ITERATION_SOURCE_NAME_PREFIX + "-" + loopId);
+        StreamNode source = this.addNode(
+                sourceId,
+                null,
+                coLocationGroup,
+                StreamIterationHead.class,
+                null,
+                ITERATION_SOURCE_NAME_PREFIX + "-" + loopId);
         sources.add(source.getId());
         setParallelism(source.getId(), parallelism);
         setMaxParallelism(source.getId(), maxParallelism);
         setResources(source.getId(), minResources, preferredResources);
 
-        StreamNode sink =
-                this.addNode(
-                        sinkId,
-                        null,
-                        coLocationGroup,
-                        StreamIterationTail.class,
-                        null,
-                        ITERATION_SINK_NAME_PREFIX + "-" + loopId);
+        StreamNode sink = this.addNode(
+                sinkId,
+                null,
+                coLocationGroup,
+                StreamIterationTail.class,
+                null,
+                ITERATION_SINK_NAME_PREFIX + "-" + loopId);
         sinks.add(sink.getId());
         setParallelism(sink.getId(), parallelism);
         setMaxParallelism(sink.getId(), parallelism);
@@ -938,10 +955,9 @@ public class StreamGraph implements Pipeline {
         // divided for head and tail nodes at the moment. To be simple, we assign all
         // resources to the head node and set the tail node resources to be zero if
         // resources are specified.
-        final ResourceSpec tailResources =
-                minResources.equals(ResourceSpec.UNKNOWN)
-                        ? ResourceSpec.UNKNOWN
-                        : ResourceSpec.ZERO;
+        final ResourceSpec tailResources = minResources.equals(ResourceSpec.UNKNOWN)
+                ? ResourceSpec.UNKNOWN
+                : ResourceSpec.ZERO;
         setResources(sink.getId(), tailResources, tailResources);
 
         iterationSourceSinkPairs.add(new Tuple2<>(source, sink));

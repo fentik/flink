@@ -115,6 +115,7 @@ under the License.
                         <fileMode>0644</fileMode>
 		</file>
 
+
 		<!-- Fentik custom: include Hive connector -->
 		<file>
                         <source>../flink-connectors/flink-connector-hive/target/flink-connector-hive_${scala.binary.version}-${project.version}.jar</source>
@@ -122,7 +123,6 @@ under the License.
                         <destName>flink-connector-hive-${project.version}.jar</destName>
                         <fileMode>0644</fileMode>
                 </file>
-
 		<!-- Built-in connectors and formats -->
 		<file>
 			<source>../flink-connectors/flink-connector-files/target/flink-connector-files-${project.version}.jar</source>

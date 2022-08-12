@@ -44,6 +44,9 @@ import org.apache.flink.util.Collector
 import org.apache.calcite.rex.RexLiteral
 import org.apache.calcite.tools.RelBuilder
 
+import org.apache.flink.table.planner.utils.Logging
+
+
 import java.time.ZoneId
 import java.util.Optional
 
@@ -57,7 +60,7 @@ class AggsHandlerCodeGenerator(
     ctx: CodeGeneratorContext,
     relBuilder: RelBuilder,
     inputFieldTypes: Seq[LogicalType],
-    copyInputField: Boolean) {
+    copyInputField: Boolean) extends Logging {
 
   private val inputType = RowType.of(inputFieldTypes: _*)
 
@@ -415,6 +418,8 @@ class AggsHandlerCodeGenerator(
         }
       """.stripMargin
 
+    LOG.info(s"Generated aggs handler for $functionName with code:\n$functionCode");
+
     new GeneratedAggsHandleFunction(
       functionName, functionCode, ctx.references.toArray, ctx.tableConfig.getConfiguration)
   }
@@ -567,6 +572,7 @@ class AggsHandlerCodeGenerator(
         }
       """.stripMargin
 
+    LOG.info(s"Generated code for $functionName code:\n$functionCode")
     new GeneratedTableAggsHandleFunction(
       functionName, functionCode, ctx.references.toArray, ctx.tableConfig.getConfiguration)
   }
@@ -694,6 +700,7 @@ class AggsHandlerCodeGenerator(
         }
       """.stripMargin
 
+    LOG.info(s"Generated code for $functionName code:\n$functionCode")
     new GeneratedNamespaceAggsHandleFunction[N](
       functionName, functionCode, ctx.references.toArray, ctx.tableConfig.getConfiguration)
   }
@@ -847,6 +854,7 @@ class AggsHandlerCodeGenerator(
         }
       """.stripMargin
 
+    LOG.info(s"Generated code for $functionName code:\n$functionCode")
     new GeneratedNamespaceTableAggsHandleFunction[N](
       functionName, functionCode, ctx.references.toArray, ctx.tableConfig.getConfiguration)
   }
