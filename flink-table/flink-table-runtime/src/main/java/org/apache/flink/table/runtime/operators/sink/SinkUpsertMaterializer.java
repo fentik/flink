@@ -26,12 +26,14 @@ import org.apache.flink.api.common.typeutils.base.ListSerializer;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.TimestampedCollector;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.generated.GeneratedRecordEqualiser;
 import org.apache.flink.table.runtime.generated.RecordEqualiser;
 import org.apache.flink.table.runtime.operators.TableStreamOperator;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.ExceptionUtils;
+
 
 
 import org.slf4j.Logger;
@@ -185,12 +187,21 @@ public class SinkUpsertMaterializer extends TableStreamOperator<RowData>
         if (values == null) {
             values = new ArrayList<>(2);
         }
+        int size = -1;
+        String key;
+        if (row instanceof BinaryRowData) {
+            size = ((BinaryRowData)row).getSizeInBytes();
+        }
+        if (values.size() > 10 || size > 1024*1024) {
+            key = row.getString(0).toString();  // Assumes the first column in a string.
+            LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: EXPENSIVE update to state value with key " + key + " to values {num entries: " + values.size() + "} with a row of size " + size);
+        }
         if (this.shouldLogInput()) {
             if (this.rowStringSerializer!= null) {
                 LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with "
                     + values.size() + " values : " + rowStringSerializer.asString(row));
             } else {
-                LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with " + values.size() + " values : " + element.toString());
+                LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with key " + key + "(" + size + ")" + " to values {num entries: " + values.size() + "} : " + element.toString());
             }
         }
         switch (row.getRowKind()) {
