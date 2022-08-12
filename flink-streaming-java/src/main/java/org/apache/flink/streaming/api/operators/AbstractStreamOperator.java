@@ -70,19 +70,29 @@ import java.util.Optional;
 import static org.apache.flink.util.Preconditions.checkState;
 
 /**
- * Base class for all stream operators. Operators that contain a user function should extend the
- * class {@link AbstractUdfStreamOperator} instead (which is a specialized subclass of this class).
+ * Base class for all stream operators. Operators that contain a user function
+ * should extend the
+ * class {@link AbstractUdfStreamOperator} instead (which is a specialized
+ * subclass of this class).
  *
- * <p>For concrete implementations, one of the following two interfaces must also be implemented, to
- * mark the operator as unary or binary: {@link OneInputStreamOperator} or {@link
+ * <p>
+ * For concrete implementations, one of the following two interfaces must also
+ * be implemented, to
+ * mark the operator as unary or binary: {@link OneInputStreamOperator} or
+ * {@link
  * TwoInputStreamOperator}.
  *
- * <p>Methods of {@code StreamOperator} are guaranteed not to be called concurrently. Also, if using
- * the timer service, timer callbacks are also guaranteed not to be called concurrently with methods
+ * <p>
+ * Methods of {@code StreamOperator} are guaranteed not to be called
+ * concurrently. Also, if using
+ * the timer service, timer callbacks are also guaranteed not to be called
+ * concurrently with methods
  * on {@code StreamOperator}.
  *
- * <p>Note, this class is going to be removed and replaced in the future by {@link
- * AbstractStreamOperatorV2}. However as {@link AbstractStreamOperatorV2} is currently experimental,
+ * <p>
+ * Note, this class is going to be removed and replaced in the future by {@link
+ * AbstractStreamOperatorV2}. However as {@link AbstractStreamOperatorV2} is
+ * currently experimental,
  * {@link AbstractStreamOperator} has not been deprecated just yet.
  *
  * @param <OUT> The output type of the operator.
@@ -90,9 +100,9 @@ import static org.apache.flink.util.Preconditions.checkState;
 @PublicEvolving
 public abstract class AbstractStreamOperator<OUT>
         implements StreamOperator<OUT>,
-                SetupableStreamOperator<OUT>,
-                CheckpointedStreamOperator,
-                Serializable {
+        SetupableStreamOperator<OUT>,
+        CheckpointedStreamOperator,
+        Serializable {
     private static final long serialVersionUID = 1L;
 
     /** The logger used by the operator class and its subclasses. */
@@ -105,7 +115,9 @@ public abstract class AbstractStreamOperator<OUT>
 
     // ---------------- runtime fields ------------------
 
-    /** The task that contains this operator (and other operators in the same chain). */
+    /**
+     * The task that contains this operator (and other operators in the same chain).
+     */
     private transient StreamTask<?, ?> container;
 
     protected transient StreamConfig config;
@@ -120,18 +132,24 @@ public abstract class AbstractStreamOperator<OUT>
     // ---------------- key/value state ------------------
 
     /**
-     * {@code KeySelector} for extracting a key from an element being processed. This is used to
-     * scope keyed state to a key. This is null if the operator is not a keyed operator.
+     * {@code KeySelector} for extracting a key from an element being processed.
+     * This is used to
+     * scope keyed state to a key. This is null if the operator is not a keyed
+     * operator.
      *
-     * <p>This is for elements from the first input.
+     * <p>
+     * This is for elements from the first input.
      */
     private transient KeySelector<?, ?> stateKeySelector1;
 
     /**
-     * {@code KeySelector} for extracting a key from an element being processed. This is used to
-     * scope keyed state to a key. This is null if the operator is not a keyed operator.
+     * {@code KeySelector} for extracting a key from an element being processed.
+     * This is used to
+     * scope keyed state to a key. This is null if the operator is not a keyed
+     * operator.
      *
-     * <p>This is for elements from the second input.
+     * <p>
+     * This is for elements from the second input.
      */
     private transient KeySelector<?, ?> stateKeySelector2;
 
@@ -153,7 +171,7 @@ public abstract class AbstractStreamOperator<OUT>
     protected transient ProcessingTimeService processingTimeService;
 
     // ------------------------------------------------------------------------
-    //  Life Cycle
+    // Life Cycle
     // ------------------------------------------------------------------------
 
     @Override
@@ -165,14 +183,12 @@ public abstract class AbstractStreamOperator<OUT>
         this.container = containingTask;
         this.config = config;
         try {
-            InternalOperatorMetricGroup operatorMetricGroup =
-                    environment
-                            .getMetricGroup()
-                            .getOrAddOperator(config.getOperatorID(), config.getOperatorName());
-            this.output =
-                    new CountingOutput<>(
-                            output,
-                            operatorMetricGroup.getIOMetricGroup().getNumRecordsOutCounter());
+            InternalOperatorMetricGroup operatorMetricGroup = environment
+                    .getMetricGroup()
+                    .getOrAddOperator(config.getOperatorID(), config.getOperatorName());
+            this.output = new CountingOutput<>(
+                    output,
+                    operatorMetricGroup.getIOMetricGroup().getNumRecordsOutCounter());
             if (config.isChainEnd()) {
                 operatorMetricGroup.getIOMetricGroup().reuseOutputMetricsForTask();
             }
@@ -195,13 +211,11 @@ public abstract class AbstractStreamOperator<OUT>
                 historySize = MetricOptions.LATENCY_HISTORY_SIZE.defaultValue();
             }
 
-            final String configuredGranularity =
-                    taskManagerConfig.getString(MetricOptions.LATENCY_SOURCE_GRANULARITY);
+            final String configuredGranularity = taskManagerConfig.getString(MetricOptions.LATENCY_SOURCE_GRANULARITY);
             LatencyStats.Granularity granularity;
             try {
-                granularity =
-                        LatencyStats.Granularity.valueOf(
-                                configuredGranularity.toUpperCase(Locale.ROOT));
+                granularity = LatencyStats.Granularity.valueOf(
+                        configuredGranularity.toUpperCase(Locale.ROOT));
             } catch (IllegalArgumentException iae) {
                 granularity = LatencyStats.Granularity.OPERATOR;
                 LOG.warn(
@@ -211,46 +225,45 @@ public abstract class AbstractStreamOperator<OUT>
                         granularity);
             }
             MetricGroup jobMetricGroup = this.metrics.getJobMetricGroup();
-            this.latencyStats =
-                    new LatencyStats(
-                            jobMetricGroup.addGroup("latency"),
-                            historySize,
-                            container.getIndexInSubtaskGroup(),
-                            getOperatorID(),
-                            granularity);
+            this.latencyStats = new LatencyStats(
+                    jobMetricGroup.addGroup("latency"),
+                    historySize,
+                    container.getIndexInSubtaskGroup(),
+                    getOperatorID(),
+                    granularity);
         } catch (Exception e) {
             LOG.warn("An error occurred while instantiating latency metrics.", e);
-            this.latencyStats =
-                    new LatencyStats(
-                            UnregisteredMetricGroups.createUnregisteredTaskManagerJobMetricGroup()
-                                    .addGroup("latency"),
-                            1,
-                            0,
-                            new OperatorID(),
-                            LatencyStats.Granularity.SINGLE);
+            this.latencyStats = new LatencyStats(
+                    UnregisteredMetricGroups.createUnregisteredTaskManagerJobMetricGroup()
+                            .addGroup("latency"),
+                    1,
+                    0,
+                    new OperatorID(),
+                    LatencyStats.Granularity.SINGLE);
         }
 
-        this.runtimeContext =
-                new StreamingRuntimeContext(
-                        environment,
-                        environment.getAccumulatorRegistry().getUserMap(),
-                        getMetricGroup(),
-                        getOperatorID(),
-                        getProcessingTimeService(),
-                        null,
-                        environment.getExternalResourceInfoProvider());
+        this.runtimeContext = new StreamingRuntimeContext(
+                environment,
+                environment.getAccumulatorRegistry().getUserMap(),
+                getMetricGroup(),
+                getOperatorID(),
+                getProcessingTimeService(),
+                null,
+                environment.getExternalResourceInfoProvider());
 
         stateKeySelector1 = config.getStatePartitioner(0, getUserCodeClassloader());
         stateKeySelector2 = config.getStatePartitioner(1, getUserCodeClassloader());
 
         String fileName = getOperatorID().toString() + ".debug";
         String configDir = System.getenv(ConfigConstants.ENV_FLINK_CONF_DIR);
-	    this.debugLogWatcher = new DebugLogWatcher(Paths.get(configDir, fileName).toString(), getOperatorName(), 10);
+        this.debugLogWatcher = new DebugLogWatcher(Paths.get(configDir, fileName).toString(), getOperatorName(), 10);
     }
 
     /**
-     * @deprecated The {@link ProcessingTimeService} instance should be passed by the operator
-     *     constructor and this method will be removed along with {@link SetupableStreamOperator}.
+     * @deprecated The {@link ProcessingTimeService} instance should be passed by
+     *             the operator
+     *             constructor and this method will be removed along with
+     *             {@link SetupableStreamOperator}.
      */
     @Deprecated
     public void setProcessingTimeService(ProcessingTimeService processingTimeService) {
@@ -266,54 +279,63 @@ public abstract class AbstractStreamOperator<OUT>
     public final void initializeState(StreamTaskStateInitializer streamTaskStateManager)
             throws Exception {
 
-        final TypeSerializer<?> keySerializer =
-                config.getStateKeySerializer(getUserCodeClassloader());
+        final TypeSerializer<?> keySerializer = config.getStateKeySerializer(getUserCodeClassloader());
 
         final StreamTask<?, ?> containingTask = Preconditions.checkNotNull(getContainingTask());
-        final CloseableRegistry streamTaskCloseableRegistry =
-                Preconditions.checkNotNull(containingTask.getCancelables());
+        final CloseableRegistry streamTaskCloseableRegistry = Preconditions
+                .checkNotNull(containingTask.getCancelables());
 
-        final StreamOperatorStateContext context =
-                streamTaskStateManager.streamOperatorStateContext(
-                        getOperatorID(),
-                        getClass().getSimpleName(),
-                        getProcessingTimeService(),
-                        this,
-                        keySerializer,
-                        streamTaskCloseableRegistry,
-                        metrics,
-                        config.getManagedMemoryFractionOperatorUseCaseOfSlot(
-                                ManagedMemoryUseCase.STATE_BACKEND,
-                                runtimeContext.getTaskManagerRuntimeInfo().getConfiguration(),
-                                runtimeContext.getUserCodeClassLoader()),
-                        isUsingCustomRawKeyedState());
+        final StreamOperatorStateContext context = streamTaskStateManager.streamOperatorStateContext(
+                getOperatorID(),
+                getClass().getSimpleName(),
+                getProcessingTimeService(),
+                this,
+                keySerializer,
+                streamTaskCloseableRegistry,
+                metrics,
+                config.getManagedMemoryFractionOperatorUseCaseOfSlot(
+                        ManagedMemoryUseCase.STATE_BACKEND,
+                        runtimeContext.getTaskManagerRuntimeInfo().getConfiguration(),
+                        runtimeContext.getUserCodeClassLoader()),
+                isUsingCustomRawKeyedState());
 
-        stateHandler =
-                new StreamOperatorStateHandler(
-                        context, getExecutionConfig(), streamTaskCloseableRegistry);
+        stateHandler = new StreamOperatorStateHandler(
+                context, getExecutionConfig(), streamTaskCloseableRegistry);
         timeServiceManager = context.internalTimerServiceManager();
         stateHandler.initializeOperatorState(this);
         runtimeContext.setKeyedStateStore(stateHandler.getKeyedStateStore().orElse(null));
     }
 
     /**
-     * Indicates whether or not implementations of this class is writing to the raw keyed state
-     * streams on snapshots, using {@link #snapshotState(StateSnapshotContext)}. If yes, subclasses
+     * Indicates whether or not implementations of this class is writing to the raw
+     * keyed state
+     * streams on snapshots, using {@link #snapshotState(StateSnapshotContext)}. If
+     * yes, subclasses
      * should override this method to return {@code true}.
      *
-     * <p>Subclasses need to explicitly indicate the use of raw keyed state because, internally, the
-     * {@link AbstractStreamOperator} may attempt to read from it as well to restore heap-based
-     * timers and ultimately fail with read errors. By setting this flag to {@code true}, this
-     * allows the {@link AbstractStreamOperator} to know that the data written in the raw keyed
-     * states were not written by the timer services, and skips the timer restore attempt.
+     * <p>
+     * Subclasses need to explicitly indicate the use of raw keyed state because,
+     * internally, the
+     * {@link AbstractStreamOperator} may attempt to read from it as well to restore
+     * heap-based
+     * timers and ultimately fail with read errors. By setting this flag to
+     * {@code true}, this
+     * allows the {@link AbstractStreamOperator} to know that the data written in
+     * the raw keyed
+     * states were not written by the timer services, and skips the timer restore
+     * attempt.
      *
-     * <p>Please refer to FLINK-19741 for further details.
+     * <p>
+     * Please refer to FLINK-19741 for further details.
      *
-     * <p>TODO: this method can be removed once all timers are moved to be managed by state
+     * <p>
+     * TODO: this method can be removed once all timers are moved to be managed by
+     * state
      * backends.
      *
-     * @return flag indicating whether or not this operator is writing to raw keyed state via {@link
-     *     #snapshotState(StateSnapshotContext)}.
+     * @return flag indicating whether or not this operator is writing to raw keyed
+     *         state via {@link
+     *         #snapshotState(StateSnapshotContext)}.
      */
     @Internal
     protected boolean isUsingCustomRawKeyedState() {
@@ -321,18 +343,22 @@ public abstract class AbstractStreamOperator<OUT>
     }
 
     /**
-     * This method is called immediately before any elements are processed, it should contain the
+     * This method is called immediately before any elements are processed, it
+     * should contain the
      * operator's initialization logic, e.g. state initialization.
      *
-     * <p>The default implementation does nothing.
+     * <p>
+     * The default implementation does nothing.
      *
      * @throws Exception An exception in this method causes the operator to fail.
      */
     @Override
-    public void open() throws Exception {}
+    public void open() throws Exception {
+    }
 
     @Override
-    public void finish() throws Exception {}
+    public void finish() throws Exception {
+    }
 
     @Override
     public void close() throws Exception {
@@ -367,21 +393,26 @@ public abstract class AbstractStreamOperator<OUT>
     }
 
     /**
-     * Stream operators with state, which want to participate in a snapshot need to override this
+     * Stream operators with state, which want to participate in a snapshot need to
+     * override this
      * hook method.
      *
-     * @param context context that provides information and means required for taking a snapshot
+     * @param context context that provides information and means required for
+     *                taking a snapshot
      */
     @Override
-    public void snapshotState(StateSnapshotContext context) throws Exception {}
+    public void snapshotState(StateSnapshotContext context) throws Exception {
+    }
 
     /**
-     * Stream operators with state which can be restored need to override this hook method.
+     * Stream operators with state which can be restored need to override this hook
+     * method.
      *
      * @param context context that allows to register different states.
      */
     @Override
-    public void initializeState(StateInitializationContext context) throws Exception {}
+    public void initializeState(StateInitializationContext context) throws Exception {
+    }
 
     @Override
     public void notifyCheckpointComplete(long checkpointId) throws Exception {
@@ -394,11 +425,12 @@ public abstract class AbstractStreamOperator<OUT>
     }
 
     // ------------------------------------------------------------------------
-    //  Properties and Services
+    // Properties and Services
     // ------------------------------------------------------------------------
 
     /**
-     * Gets the execution config defined on the execution environment of the job to which this
+     * Gets the execution config defined on the execution environment of the job to
+     * which this
      * operator belongs.
      *
      * @return The job's execution config.
@@ -422,12 +454,15 @@ public abstract class AbstractStreamOperator<OUT>
     public boolean shouldLogInput() {
         return debugLogWatcher.shouldLog();
     }
+
     /**
-     * Return the operator name. If the runtime context has been set, then the task name with
+     * Return the operator name. If the runtime context has been set, then the task
+     * name with
      * subtask index is returned. Otherwise, the simple class name is returned.
      *
-     * @return If runtime context is set, then return task name with subtask index. Otherwise return
-     *     simple class name.
+     * @return If runtime context is set, then return task name with subtask index.
+     *         Otherwise return
+     *         simple class name.
      */
     protected String getOperatorName() {
         if (runtimeContext != null) {
@@ -438,8 +473,10 @@ public abstract class AbstractStreamOperator<OUT>
     }
 
     /**
-     * Returns a context that allows the operator to query information about the execution and also
-     * to interact with systems such as broadcast variables and managed state. This also allows to
+     * Returns a context that allows the operator to query information about the
+     * execution and also
+     * to interact with systems such as broadcast variables and managed state. This
+     * also allows to
      * register timers.
      */
     @VisibleForTesting
@@ -457,7 +494,8 @@ public abstract class AbstractStreamOperator<OUT>
     }
 
     /**
-     * Returns the {@link ProcessingTimeService} responsible for getting the current processing time
+     * Returns the {@link ProcessingTimeService} responsible for getting the current
+     * processing time
      * and registering timers.
      */
     @VisibleForTesting
@@ -466,10 +504,13 @@ public abstract class AbstractStreamOperator<OUT>
     }
 
     /**
-     * Creates a partitioned state handle, using the state backend configured for this task.
+     * Creates a partitioned state handle, using the state backend configured for
+     * this task.
      *
-     * @throws IllegalStateException Thrown, if the key/value state was already initialized.
-     * @throws Exception Thrown, if the state backend cannot create the key/value state.
+     * @throws IllegalStateException Thrown, if the key/value state was already
+     *                               initialized.
+     * @throws Exception             Thrown, if the state backend cannot create the
+     *                               key/value state.
      */
     protected <S extends State> S getPartitionedState(StateDescriptor<S, ?> stateDescriptor)
             throws Exception {
@@ -484,10 +525,13 @@ public abstract class AbstractStreamOperator<OUT>
     }
 
     /**
-     * Creates a partitioned state handle, using the state backend configured for this task.
+     * Creates a partitioned state handle, using the state backend configured for
+     * this task.
      *
-     * @throws IllegalStateException Thrown, if the key/value state was already initialized.
-     * @throws Exception Thrown, if the state backend cannot create the key/value state.
+     * @throws IllegalStateException Thrown, if the key/value state was already
+     *                               initialized.
+     * @throws Exception             Thrown, if the state backend cannot create the
+     *                               key/value state.
      */
     protected <S extends State, N> S getPartitionedState(
             N namespace,
@@ -498,13 +542,13 @@ public abstract class AbstractStreamOperator<OUT>
     }
 
     @Override
-    @SuppressWarnings({"unchecked", "rawtypes"})
+    @SuppressWarnings({ "unchecked", "rawtypes" })
     public void setKeyContextElement1(StreamRecord record) throws Exception {
         setKeyContextElement(record, stateKeySelector1);
     }
 
     @Override
-    @SuppressWarnings({"unchecked", "rawtypes"})
+    @SuppressWarnings({ "unchecked", "rawtypes" })
     public void setKeyContextElement2(StreamRecord record) throws Exception {
         setKeyContextElement(record, stateKeySelector2);
     }
@@ -533,7 +577,7 @@ public abstract class AbstractStreamOperator<OUT>
     }
 
     // ------------------------------------------------------------------------
-    //  Context and chaining properties
+    // Context and chaining properties
     // ------------------------------------------------------------------------
 
     @Override
@@ -547,7 +591,7 @@ public abstract class AbstractStreamOperator<OUT>
     }
 
     // ------------------------------------------------------------------------
-    //  Metrics
+    // Metrics
     // ------------------------------------------------------------------------
 
     // ------- One input stream
@@ -573,28 +617,39 @@ public abstract class AbstractStreamOperator<OUT>
     }
 
     // ------------------------------------------------------------------------
-    //  Watermark handling
+    // Watermark handling
     // ------------------------------------------------------------------------
 
     /**
-     * Returns a {@link InternalTimerService} that can be used to query current processing time and
-     * event time and to set timers. An operator can have several timer services, where each has its
-     * own namespace serializer. Timer services are differentiated by the string key that is given
-     * when requesting them, if you call this method with the same key multiple times you will get
+     * Returns a {@link InternalTimerService} that can be used to query current
+     * processing time and
+     * event time and to set timers. An operator can have several timer services,
+     * where each has its
+     * own namespace serializer. Timer services are differentiated by the string key
+     * that is given
+     * when requesting them, if you call this method with the same key multiple
+     * times you will get
      * the same timer service instance in subsequent requests.
      *
-     * <p>Timers are always scoped to a key, the currently active key of a keyed stream operation.
+     * <p>
+     * Timers are always scoped to a key, the currently active key of a keyed stream
+     * operation.
      * When a timer fires, this key will also be set as the currently active key.
      *
-     * <p>Each timer has attached metadata, the namespace. Different timer services can have a
-     * different namespace type. If you don't need namespace differentiation you can use {@link
+     * <p>
+     * Each timer has attached metadata, the namespace. Different timer services can
+     * have a
+     * different namespace type. If you don't need namespace differentiation you can
+     * use {@link
      * VoidNamespaceSerializer} as the namespace serializer.
      *
-     * @param name The name of the requested timer service. If no service exists under the given
-     *     name a new one will be created and returned.
+     * @param name                The name of the requested timer service. If no
+     *                            service exists under the given
+     *                            name a new one will be created and returned.
      * @param namespaceSerializer {@code TypeSerializer} for the timer namespace.
-     * @param triggerable The {@link Triggerable} that should be invoked when timers fire
-     * @param <N> The type of the timer namespace.
+     * @param triggerable         The {@link Triggerable} that should be invoked
+     *                            when timers fire
+     * @param <N>                 The type of the timer namespace.
      */
     public <K, N> InternalTimerService<N> getInternalTimerService(
             String name, TypeSerializer<N> namespaceSerializer, Triggerable<K, N> triggerable) {
@@ -602,8 +657,7 @@ public abstract class AbstractStreamOperator<OUT>
             throw new RuntimeException("The timer service has not been initialized.");
         }
         @SuppressWarnings("unchecked")
-        InternalTimeServiceManager<K> keyedTimeServiceHandler =
-                (InternalTimeServiceManager<K>) timeServiceManager;
+        InternalTimeServiceManager<K> keyedTimeServiceHandler = (InternalTimeServiceManager<K>) timeServiceManager;
         KeyedStateBackend<K> keyedStateBackend = getKeyedStateBackend();
         checkState(keyedStateBackend != null, "Timers can only be used on keyed operators.");
         return keyedTimeServiceHandler.getInternalTimerService(

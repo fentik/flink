@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.runtime.operators.join.stream;
 
-
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.Meter;
 import org.apache.flink.metrics.MeterView;
@@ -36,16 +35,20 @@ import org.apache.flink.table.runtime.operators.join.stream.state.OuterJoinRecor
 import org.apache.flink.table.runtime.operators.join.stream.state.OuterJoinRecordStateViews;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.types.RowKind;
+import org.apache.flink.table.runtime.util.RowDataStringSerializer;
 
-/** Streaming unbounded Join operator which supports INNER/LEFT/RIGHT/FULL JOIN. */
+/**
+ * Streaming unbounded Join operator which supports INNER/LEFT/RIGHT/FULL JOIN.
+ */
 public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
-
 
     private static final long serialVersionUID = -376944622236540545L;
 
-    // whether left side is outer side, e.g. left is outer but right is not when LEFT OUTER JOIN
+    // whether left side is outer side, e.g. left is outer but right is not when
+    // LEFT OUTER JOIN
     private final boolean leftIsOuter;
-    // whether right side is outer side, e.g. right is outer but left is not when RIGHT OUTER JOIN
+    // whether right side is outer side, e.g. right is outer but left is not when
+    // RIGHT OUTER JOIN
     private final boolean rightIsOuter;
 
     private transient JoinedRowData outRow;
@@ -57,8 +60,8 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
     // right join state
     private transient JoinRecordStateView rightRecordStateView;
 
-
-    // Stats related to associatedRecords for each processed row. Helps us understand the overhead of
+    // Stats related to associatedRecords for each processed row. Helps us
+    // understand the overhead of
     // reading from state.
     private transient Counter associatedRecordsSizeSum;
     private transient Counter associatedRecordsCallCount;
@@ -74,7 +77,8 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
             boolean leftIsOuter,
             boolean rightIsOuter,
             boolean[] filterNullKeys,
-            long stateRetentionTime) {
+            long stateRetentionTime,
+            boolean isBatchBackfillEnabled) {
         super(
                 leftType,
                 rightType,
@@ -82,7 +86,8 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                 leftInputSideSpec,
                 rightInputSideSpec,
                 filterNullKeys,
-                stateRetentionTime);
+                stateRetentionTime,
+                isBatchBackfillEnabled);
         this.leftIsOuter = leftIsOuter;
         this.rightIsOuter = rightIsOuter;
     }
@@ -97,46 +102,52 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
 
         this.associatedRecordsCallCount = getRuntimeContext().getMetricGroup().counter("associated_records_call_count");
         this.associatedRecordsCallRate = getRuntimeContext().getMetricGroup().meter("associated_records_call_rate",
-                                                                new MeterView(this.associatedRecordsCallCount));
+                new MeterView(this.associatedRecordsCallCount));
         this.associatedRecordsSizeSum = getRuntimeContext().getMetricGroup().counter("associated_records_size_sum");
-        this.associatedRecordsSizeSumRate = getRuntimeContext().getMetricGroup().meter("associated_records_size_sum_rate",
-                                                                new MeterView(this.associatedRecordsSizeSum));
+        this.associatedRecordsSizeSumRate = getRuntimeContext().getMetricGroup().meter(
+                "associated_records_size_sum_rate",
+                new MeterView(this.associatedRecordsSizeSum));
+
+        if (leftIsOuter && rightIsOuter) {
+            // we don't support FULL OUTER yet
+            LOG.info("{} FULL OUTER batch mode not supported", getPrintableName());
+            isBatchBackfillEnabled = false;
+            setStreamMode(true);
+        }
 
         // initialize states
         if (leftIsOuter) {
-            this.leftRecordStateView =
-                    OuterJoinRecordStateViews.create(
-                            getRuntimeContext(),
-                            "left-records",
-                            leftInputSideSpec,
-                            leftType,
-                            stateRetentionTime);
+            this.leftRecordStateView = OuterJoinRecordStateViews.create(
+                    getRuntimeContext(),
+                    "left-records",
+                    leftInputSideSpec,
+                    leftType,
+                    rightType,
+                    stateRetentionTime);
         } else {
-            this.leftRecordStateView =
-                    JoinRecordStateViews.create(
-                            getRuntimeContext(),
-                            "left-records",
-                            leftInputSideSpec,
-                            leftType,
-                            stateRetentionTime);
+            this.leftRecordStateView = JoinRecordStateViews.create(
+                    getRuntimeContext(),
+                    "left-records",
+                    leftInputSideSpec,
+                    leftType,
+                    stateRetentionTime);
         }
 
         if (rightIsOuter) {
-            this.rightRecordStateView =
-                    OuterJoinRecordStateViews.create(
-                            getRuntimeContext(),
-                            "right-records",
-                            rightInputSideSpec,
-                            rightType,
-                            stateRetentionTime);
+            this.rightRecordStateView = OuterJoinRecordStateViews.create(
+                    getRuntimeContext(),
+                    "right-records",
+                    rightInputSideSpec,
+                    rightType,
+                    leftType,
+                    stateRetentionTime);
         } else {
-            this.rightRecordStateView =
-                    JoinRecordStateViews.create(
-                            getRuntimeContext(),
-                            "right-records",
-                            rightInputSideSpec,
-                            rightType,
-                            stateRetentionTime);
+            this.rightRecordStateView = JoinRecordStateViews.create(
+                    getRuntimeContext(),
+                    "right-records",
+                    rightInputSideSpec,
+                    rightType,
+                    stateRetentionTime);
         }
     }
 
@@ -150,20 +161,42 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         processElement(element.getValue(), rightRecordStateView, leftRecordStateView, false);
     }
 
+    @Override
+    protected boolean isHybridStreamBatchCapable() {
+        return true;
+    }
+
+    @Override
+    protected void emitStateAndSwitchToStreaming() throws Exception {
+        LOG.info("{} emit and switch to streaming", getPrintableName());
+        leftRecordStateView.emitCompleteState(getKeyedStateBackend(), this.collector,
+            rightRecordStateView, joinCondition);
+        setStreamMode(true);
+    }
 
     /**
-     * Process an input element and output incremental joined records, retraction messages will be
+     * Process an input element and output incremental joined records, retraction
+     * messages will be
      * sent in some scenarios.
      *
-     * <p>Following is the pseudo code to describe the core logic of this method. The logic of this
-     * method is too complex, so we provide the pseudo code to help understand the logic. We should
+     * <p>
+     * Following is the pseudo code to describe the core logic of this method. The
+     * logic of this
+     * method is too complex, so we provide the pseudo code to help understand the
+     * logic. We should
      * keep sync the following pseudo code with the real logic of the method.
      *
-     * <p>Note: "+I" represents "INSERT", "-D" represents "DELETE", "+U" represents "UPDATE_AFTER",
-     * "-U" represents "UPDATE_BEFORE". We forward input RowKind if it is inner join, otherwise, we
-     * always send insert and delete for simplification. We can optimize this to send -U & +U
-     * instead of D & I in the future (see FLINK-17337). They are equivalent in this join case. It
-     * may need some refactoring if we want to send -U & +U, so we still keep -D & +I for now for
+     * <p>
+     * Note: "+I" represents "INSERT", "-D" represents "DELETE", "+U" represents
+     * "UPDATE_AFTER",
+     * "-U" represents "UPDATE_BEFORE". We forward input RowKind if it is inner
+     * join, otherwise, we
+     * always send insert and delete for simplification. We can optimize this to
+     * send -U & +U
+     * instead of D & I in the future (see FLINK-17337). They are equivalent in this
+     * join case. It
+     * may need some refactoring if we want to send -U & +U, so we still keep -D &
+     * +I for now for
      * simplification. See {@code
      * FlinkChangelogModeInferenceProgram.SatisfyModifyKindSetTraitVisitor}.
      *
@@ -212,10 +245,10 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
      * endif
      * </pre>
      *
-     * @param input the input element
+     * @param input              the input element
      * @param inputSideStateView state of input side
      * @param otherSideStateView state of other side
-     * @param inputIsLeft whether input side is left side
+     * @param inputIsLeft        whether input side is left side
      */
     private void processElement(
             RowData input,
@@ -229,18 +262,20 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         RowKind inputRowKind = input.getRowKind();
         input.setRowKind(RowKind.INSERT); // erase RowKind for later state updating
 
-    	// Pass in leftType, rightType, OperatorName, which are used to log expensive joins.
-        AssociatedRecords associatedRecords =
-	    AssociatedRecords.of(input, inputIsLeft, this.leftType, this.rightType, getOperatorName(), otherSideStateView, joinCondition);
+        // Pass in leftType, rightType, OperatorName, which are used to log expensive
+        // joins.
+        AssociatedRecords associatedRecords = AssociatedRecords.of(input, inputIsLeft, this.leftType, this.rightType,
+                getOperatorName(), otherSideStateView, joinCondition);
         this.associatedRecordsSizeSum.inc(associatedRecords.size());
         this.associatedRecordsCallCount.inc();
         if (this.shouldLogInput()) {
-            LOG.info("Processing input row: " + rowToString(inputIsLeft ? leftType : rightType, input));
+            RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(
+                    inputIsLeft ? leftType : rightType);
+            LOG.info("Processing input row: " + rowStringSerializer.asString(input));
         }
         if (isAccumulateMsg) { // record is accumulate
             if (inputIsOuter) { // input side is outer
-                OuterJoinRecordStateView inputSideOuterStateView =
-                        (OuterJoinRecordStateView) inputSideStateView;
+                OuterJoinRecordStateView inputSideOuterStateView = (OuterJoinRecordStateView) inputSideStateView;
                 if (associatedRecords.isEmpty()) { // there is no matched rows on the other side
                     // send +I[record+null]
                     outRow.setRowKind(RowKind.INSERT);
@@ -249,8 +284,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                     inputSideOuterStateView.addRecord(input, 0);
                 } else { // there are matched rows on the other side
                     if (otherIsOuter) { // other side is outer
-                        OuterJoinRecordStateView otherSideOuterStateView =
-                                (OuterJoinRecordStateView) otherSideStateView;
+                        OuterJoinRecordStateView otherSideOuterStateView = (OuterJoinRecordStateView) otherSideStateView;
                         for (OuterRecord outerRecord : associatedRecords.getOuterRecords()) {
                             RowData other = outerRecord.record;
                             // if the matched num in the matched rows == 0
@@ -259,15 +293,19 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                                 outRow.setRowKind(RowKind.DELETE);
                                 outputNullPadding(other, !inputIsLeft);
                             } // ignore matched number > 0
-                            // otherState.update(other, old + 1)
+                              // otherState.update(other, old + 1)
                             otherSideOuterStateView.updateNumOfAssociations(
                                     other, outerRecord.numOfAssociations + 1);
                         }
                     }
                     // send +I[record+other]s
-                    outRow.setRowKind(RowKind.INSERT);
-                    for (RowData other : associatedRecords.getRecords()) {
-                        output(input, other, inputIsLeft);
+                    if (!isBatchMode()) {
+                        // do not even retrieve records since the results are only used
+                        // to emit and not mutate state, we do not want to waste cycles
+                        outRow.setRowKind(RowKind.INSERT);
+                        for (RowData other : associatedRecords.getRecords()) {
+                            output(input, other, inputIsLeft);
+                        }
                     }
                     // state.add(record, other.size)
                     inputSideOuterStateView.addRecord(input, associatedRecords.size());
@@ -277,11 +315,9 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                 inputSideStateView.addRecord(input);
                 if (!associatedRecords.isEmpty()) { // if there are matched rows on the other side
                     if (otherIsOuter) { // if other side is outer
-                        OuterJoinRecordStateView otherSideOuterStateView =
-                                (OuterJoinRecordStateView) otherSideStateView;
+                        OuterJoinRecordStateView otherSideOuterStateView = (OuterJoinRecordStateView) otherSideStateView;
                         for (OuterRecord outerRecord : associatedRecords.getOuterRecords()) {
-                            if (outerRecord.numOfAssociations
-                                    == 0) { // if the matched num in the matched rows == 0
+                            if (outerRecord.numOfAssociations == 0) { // if the matched num in the matched rows == 0
                                 // send -D[null+other]
                                 outRow.setRowKind(RowKind.DELETE);
                                 outputNullPadding(outerRecord.record, !inputIsLeft);
@@ -296,8 +332,12 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                         // send +I/+U[record+other]s (using input RowKind)
                         outRow.setRowKind(inputRowKind);
                     }
-                    for (RowData other : associatedRecords.getRecords()) {
-                        output(input, other, inputIsLeft);
+                    if (!isBatchMode()) {
+                        // do not even retrieve records since the results are only used
+                        // to emit and not mutate state, we do not want to waste cycles
+                        for (RowData other : associatedRecords.getRecords()) {
+                            output(input, other, inputIsLeft);
+                        }
                     }
                 }
                 // skip when there is no matched rows on the other side
@@ -320,20 +360,23 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                     // send -D/-U[record+other]s (using input RowKind)
                     outRow.setRowKind(inputRowKind);
                 }
-                for (RowData other : associatedRecords.getRecords()) {
-                    output(input, other, inputIsLeft);
+                if (!isBatchMode()) {
+                    // do not even retrieve records since the results are only used
+                    // to emit and not mutate state, we do not want to waste cycles
+                    for (RowData other : associatedRecords.getRecords()) {
+                        output(input, other, inputIsLeft);
+                    }
                 }
                 // if other side is outer
                 if (otherIsOuter) {
-                    OuterJoinRecordStateView otherSideOuterStateView =
-                            (OuterJoinRecordStateView) otherSideStateView;
+                    OuterJoinRecordStateView otherSideOuterStateView = (OuterJoinRecordStateView) otherSideStateView;
                     for (OuterRecord outerRecord : associatedRecords.getOuterRecords()) {
                         if (outerRecord.numOfAssociations == 1) {
                             // send +I[null+other]
                             outRow.setRowKind(RowKind.INSERT);
                             outputNullPadding(outerRecord.record, !inputIsLeft);
                         } // nothing else to do when number of associations > 1
-                        // otherState.update(other, old - 1)
+                          // otherState.update(other, old - 1)
                         otherSideOuterStateView.updateNumOfAssociations(
                                 outerRecord.record, outerRecord.numOfAssociations - 1);
                     }
@@ -345,6 +388,9 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
     // -------------------------------------------------------------------------------------
 
     private void output(RowData inputRow, RowData otherRow, boolean inputIsLeft) {
+        if (isBatchMode()) {
+            return;
+        }
         if (inputIsLeft) {
             outRow.replace(inputRow, otherRow);
         } else {
@@ -354,6 +400,9 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
     }
 
     private void outputNullPadding(RowData row, boolean isLeft) {
+        if (isBatchMode()) {
+            return;
+        }
         if (isLeft) {
             outRow.replace(row, rightNullRow);
         } else {

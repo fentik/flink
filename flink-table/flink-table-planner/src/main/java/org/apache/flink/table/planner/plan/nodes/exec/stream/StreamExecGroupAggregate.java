@@ -69,15 +69,12 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 /**
  * Stream {@link ExecNode} for unbounded group aggregate.
  *
- * <p>This node does support un-splittable aggregate function (e.g. STDDEV_POP).
+ * <p>
+ * This node does support un-splittable aggregate function (e.g. STDDEV_POP).
  */
-@ExecNodeMetadata(
-        name = "stream-exec-group-aggregate",
-        version = 1,
-        consumedOptions = {"table.exec.mini-batch.enabled", "table.exec.mini-batch.size"},
-        producedTransformations = StreamExecGroupAggregate.GROUP_AGGREGATE_TRANSFORMATION,
-        minPlanVersion = FlinkVersion.v1_15,
-        minStateVersion = FlinkVersion.v1_15)
+@ExecNodeMetadata(name = "stream-exec-group-aggregate", version = 1, consumedOptions = {
+        "table.exec.mini-batch.enabled",
+        "table.exec.mini-batch.size" }, producedTransformations = StreamExecGroupAggregate.GROUP_AGGREGATE_TRANSFORMATION, minPlanVersion = FlinkVersion.v1_15, minStateVersion = FlinkVersion.v1_15)
 public class StreamExecGroupAggregate extends StreamExecAggregateBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(StreamExecGroupAggregate.class);
@@ -90,7 +87,10 @@ public class StreamExecGroupAggregate extends StreamExecAggregateBase {
     @JsonProperty(FIELD_NAME_AGG_CALLS)
     private final AggregateCall[] aggCalls;
 
-    /** Each element indicates whether the corresponding agg call needs `retract` method. */
+    /**
+     * Each element indicates whether the corresponding agg call needs `retract`
+     * method.
+     */
     @JsonProperty(FIELD_NAME_AGG_CALL_NEED_RETRACTIONS)
     private final boolean[] aggCallNeedRetractions;
 
@@ -160,91 +160,82 @@ public class StreamExecGroupAggregate extends StreamExecAggregateBase {
         }
 
         final ExecEdge inputEdge = getInputEdges().get(0);
-        final Transformation<RowData> inputTransform =
-                (Transformation<RowData>) inputEdge.translateToPlan(planner);
+        final Transformation<RowData> inputTransform = (Transformation<RowData>) inputEdge.translateToPlan(planner);
         final RowType inputRowType = (RowType) inputEdge.getOutputType();
 
-        final AggsHandlerCodeGenerator generator =
-                new AggsHandlerCodeGenerator(
-                                new CodeGeneratorContext(config.getTableConfig()),
-                                planner.getRelBuilder(),
-                                JavaScalaConversionUtil.toScala(inputRowType.getChildren()),
-                                // TODO: heap state backend do not copy key currently,
-                                //  we have to copy input field
-                                // TODO: copy is not need when state backend is rocksdb,
-                                //  improve this in future
-                                // TODO: but other operators do not copy this input field.....
-                                true)
-                        .needAccumulate();
+        final AggsHandlerCodeGenerator generator = new AggsHandlerCodeGenerator(
+                new CodeGeneratorContext(config.getTableConfig()),
+                planner.getRelBuilder(),
+                JavaScalaConversionUtil.toScala(inputRowType.getChildren()),
+                // TODO: heap state backend do not copy key currently,
+                // we have to copy input field
+                // TODO: copy is not need when state backend is rocksdb,
+                // improve this in future
+                // TODO: but other operators do not copy this input field.....
+                true)
+                .needAccumulate();
 
         if (needRetraction) {
             generator.needRetract();
         }
 
-        final AggregateInfoList aggInfoList =
-                AggregateUtil.transformToStreamAggregateInfoList(
-                        inputRowType,
-                        JavaScalaConversionUtil.toScala(Arrays.asList(aggCalls)),
-                        aggCallNeedRetractions,
-                        needRetraction,
-                        true,
-                        true);
-        final GeneratedAggsHandleFunction aggsHandler =
-                generator.generateAggsHandler("GroupAggsHandler", aggInfoList);
+        final AggregateInfoList aggInfoList = AggregateUtil.transformToStreamAggregateInfoList(
+                inputRowType,
+                JavaScalaConversionUtil.toScala(Arrays.asList(aggCalls)),
+                aggCallNeedRetractions,
+                needRetraction,
+                true,
+                true);
+        final GeneratedAggsHandleFunction aggsHandler = generator.generateAggsHandler("GroupAggsHandler", aggInfoList);
 
-        final LogicalType[] accTypes =
-                Arrays.stream(aggInfoList.getAccTypes())
-                        .map(LogicalTypeDataTypeConverter::fromDataTypeToLogicalType)
-                        .toArray(LogicalType[]::new);
-        final LogicalType[] aggValueTypes =
-                Arrays.stream(aggInfoList.getActualValueTypes())
-                        .map(LogicalTypeDataTypeConverter::fromDataTypeToLogicalType)
-                        .toArray(LogicalType[]::new);
-        final GeneratedRecordEqualiser recordEqualiser =
-                new EqualiserCodeGenerator(aggValueTypes)
-                        .generateRecordEqualiser("GroupAggValueEqualiser");
+        final LogicalType[] accTypes = Arrays.stream(aggInfoList.getAccTypes())
+                .map(LogicalTypeDataTypeConverter::fromDataTypeToLogicalType)
+                .toArray(LogicalType[]::new);
+        final LogicalType[] aggValueTypes = Arrays.stream(aggInfoList.getActualValueTypes())
+                .map(LogicalTypeDataTypeConverter::fromDataTypeToLogicalType)
+                .toArray(LogicalType[]::new);
+        final GeneratedRecordEqualiser recordEqualiser = new EqualiserCodeGenerator(aggValueTypes)
+                .generateRecordEqualiser("GroupAggValueEqualiser");
         final int inputCountIndex = aggInfoList.getIndexOfCountStar();
-        final boolean isMiniBatchEnabled =
-                config.get(ExecutionConfigOptions.TABLE_EXEC_MINIBATCH_ENABLED);
+        final boolean isMiniBatchEnabled = config.get(ExecutionConfigOptions.TABLE_EXEC_MINIBATCH_ENABLED);
+
+        final boolean isBatchBackfillEnabled = config.get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL); 
 
         final OneInputStreamOperator<RowData, RowData> operator;
         if (isMiniBatchEnabled) {
-            MiniBatchGroupAggFunction aggFunction =
-                    new MiniBatchGroupAggFunction(
-                            aggsHandler,
-                            recordEqualiser,
-                            accTypes,
-                            inputRowType,
-                            inputCountIndex,
-                            generateUpdateBefore,
-                            config.getStateRetentionTime());
-            operator =
-                    new KeyedMapBundleOperator<>(
-                            aggFunction, AggregateUtil.createMiniBatchTrigger(config));
+            MiniBatchGroupAggFunction aggFunction = new MiniBatchGroupAggFunction(
+                    aggsHandler,
+                    recordEqualiser,
+                    accTypes,
+                    inputRowType,
+                    inputCountIndex,
+                    generateUpdateBefore,
+                    config.getStateRetentionTime());
+            operator = new KeyedMapBundleOperator<>(
+                    aggFunction, AggregateUtil.createMiniBatchTrigger(config));
         } else {
-            GroupAggFunction aggFunction =
-                    new GroupAggFunction(
-                            aggsHandler,
-                            recordEqualiser,
-                            accTypes,
-                            inputCountIndex,
-                            generateUpdateBefore,
-                            config.getStateRetentionTime());
+            GroupAggFunction aggFunction = new GroupAggFunction(
+                    aggsHandler,
+                    recordEqualiser,
+                    accTypes,
+                    inputCountIndex,
+                    generateUpdateBefore,
+                    config.getStateRetentionTime(),
+                    isBatchBackfillEnabled);
             operator = new KeyedProcessOperator<>(aggFunction);
         }
 
         // partitioned aggregation
-        final OneInputTransformation<RowData, RowData> transform =
-                ExecNodeUtil.createOneInputTransformation(
-                        inputTransform,
-                        createTransformationMeta(GROUP_AGGREGATE_TRANSFORMATION, config),
-                        operator,
-                        InternalTypeInfo.of(getOutputType()),
-                        inputTransform.getParallelism());
+        final OneInputTransformation<RowData, RowData> transform = ExecNodeUtil.createOneInputTransformation(
+                inputTransform,
+                createTransformationMeta(GROUP_AGGREGATE_TRANSFORMATION, config),
+                operator,
+                InternalTypeInfo.of(getOutputType()),
+                inputTransform.getParallelism());
 
         // set KeyType and Selector for state
-        final RowDataKeySelector selector =
-                KeySelectorUtil.getRowDataSelector(grouping, InternalTypeInfo.of(inputRowType));
+        final RowDataKeySelector selector = KeySelectorUtil.getRowDataSelector(grouping,
+                InternalTypeInfo.of(inputRowType));
         transform.setStateKeySelector(selector);
         transform.setStateKeyType(selector.getProducedType());
 

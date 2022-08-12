@@ -108,10 +108,10 @@ public class UpsertKafkaDynamicTableFactory
         FactoryUtil.TableFactoryHelper helper = FactoryUtil.createTableFactoryHelper(this, context);
 
         ReadableConfig tableOptions = helper.getOptions();
-        DecodingFormat<DeserializationSchema<RowData>> keyDecodingFormat =
-                helper.discoverDecodingFormat(DeserializationFormatFactory.class, KEY_FORMAT);
-        DecodingFormat<DeserializationSchema<RowData>> valueDecodingFormat =
-                helper.discoverDecodingFormat(DeserializationFormatFactory.class, VALUE_FORMAT);
+        DecodingFormat<DeserializationSchema<RowData>> keyDecodingFormat = helper
+                .discoverDecodingFormat(DeserializationFormatFactory.class, KEY_FORMAT);
+        DecodingFormat<DeserializationSchema<RowData>> valueDecodingFormat = helper
+                .discoverDecodingFormat(DeserializationFormatFactory.class, VALUE_FORMAT);
 
         // Validate the option data type.
         helper.validateExcept(PROPERTIES_PREFIX);
@@ -121,8 +121,7 @@ public class UpsertKafkaDynamicTableFactory
                 valueDecodingFormat,
                 context.getPrimaryKeyIndexes());
 
-        Tuple2<int[], int[]> keyValueProjections =
-                createKeyValueProjections(context.getCatalogTable());
+        Tuple2<int[], int[]> keyValueProjections = createKeyValueProjections(context.getCatalogTable());
         String keyPrefix = tableOptions.getOptional(KEY_FIELDS_PREFIX).orElse(null);
         Properties properties = getKafkaProperties(context.getCatalogTable().getOptions());
         // always use earliest to keep data integrity
@@ -142,21 +141,21 @@ public class UpsertKafkaDynamicTableFactory
                 Collections.emptyMap(),
                 0,
                 true,
+                -1 /* sourceParallelism */,
                 context.getObjectIdentifier().asSummaryString());
     }
 
     @Override
     public DynamicTableSink createDynamicTableSink(Context context) {
-        FactoryUtil.TableFactoryHelper helper =
-                FactoryUtil.createTableFactoryHelper(
-                        this, autoCompleteSchemaRegistrySubject(context));
+        FactoryUtil.TableFactoryHelper helper = FactoryUtil.createTableFactoryHelper(
+                this, autoCompleteSchemaRegistrySubject(context));
 
         final ReadableConfig tableOptions = helper.getOptions();
 
-        EncodingFormat<SerializationSchema<RowData>> keyEncodingFormat =
-                helper.discoverEncodingFormat(SerializationFormatFactory.class, KEY_FORMAT);
-        EncodingFormat<SerializationSchema<RowData>> valueEncodingFormat =
-                helper.discoverEncodingFormat(SerializationFormatFactory.class, VALUE_FORMAT);
+        EncodingFormat<SerializationSchema<RowData>> keyEncodingFormat = helper
+                .discoverEncodingFormat(SerializationFormatFactory.class, KEY_FORMAT);
+        EncodingFormat<SerializationSchema<RowData>> valueEncodingFormat = helper
+                .discoverEncodingFormat(SerializationFormatFactory.class, VALUE_FORMAT);
 
         // Validate the option data type.
         helper.validateExcept(PROPERTIES_PREFIX);
@@ -166,8 +165,7 @@ public class UpsertKafkaDynamicTableFactory
                 valueEncodingFormat,
                 context.getPrimaryKeyIndexes());
 
-        Tuple2<int[], int[]> keyValueProjections =
-                createKeyValueProjections(context.getCatalogTable());
+        Tuple2<int[], int[]> keyValueProjections = createKeyValueProjections(context.getCatalogTable());
         final String keyPrefix = tableOptions.getOptional(KEY_FIELDS_PREFIX).orElse(null);
         final Properties properties = getKafkaProperties(context.getCatalogTable().getOptions());
 
@@ -175,8 +173,7 @@ public class UpsertKafkaDynamicTableFactory
 
         int batchSize = tableOptions.get(SINK_BUFFER_FLUSH_MAX_ROWS);
         Duration batchInterval = tableOptions.get(SINK_BUFFER_FLUSH_INTERVAL);
-        SinkBufferFlushMode flushMode =
-                new SinkBufferFlushMode(batchSize, batchInterval.toMillis());
+        SinkBufferFlushMode flushMode = new SinkBufferFlushMode(batchSize, batchInterval.toMillis());
 
         // use {@link org.apache.kafka.clients.producer.internals.DefaultPartitioner}.
         // it will use hash partition if key is set else in round-robin behaviour.
@@ -300,18 +297,18 @@ public class UpsertKafkaDynamicTableFactory
     // --------------------------------------------------------------------------------------------
 
     /**
-     * It is used to wrap the decoding format and expose the desired changelog mode. It's only works
+     * It is used to wrap the decoding format and expose the desired changelog mode.
+     * It's only works
      * for insert-only format.
      */
     protected static class DecodingFormatWrapper
             implements DecodingFormat<DeserializationSchema<RowData>> {
         private final DecodingFormat<DeserializationSchema<RowData>> innerDecodingFormat;
 
-        private static final ChangelogMode SOURCE_CHANGELOG_MODE =
-                ChangelogMode.newBuilder()
-                        .addContainedKind(RowKind.UPDATE_AFTER)
-                        .addContainedKind(RowKind.DELETE)
-                        .build();
+        private static final ChangelogMode SOURCE_CHANGELOG_MODE = ChangelogMode.newBuilder()
+                .addContainedKind(RowKind.UPDATE_AFTER)
+                .addContainedKind(RowKind.DELETE)
+                .build();
 
         public DecodingFormatWrapper(
                 DecodingFormat<DeserializationSchema<RowData>> innerDecodingFormat) {
@@ -350,19 +347,19 @@ public class UpsertKafkaDynamicTableFactory
     }
 
     /**
-     * It is used to wrap the encoding format and expose the desired changelog mode. It's only works
+     * It is used to wrap the encoding format and expose the desired changelog mode.
+     * It's only works
      * for insert-only format.
      */
     protected static class EncodingFormatWrapper
             implements EncodingFormat<SerializationSchema<RowData>> {
         private final EncodingFormat<SerializationSchema<RowData>> innerEncodingFormat;
 
-        public static final ChangelogMode SINK_CHANGELOG_MODE =
-                ChangelogMode.newBuilder()
-                        .addContainedKind(RowKind.INSERT)
-                        .addContainedKind(RowKind.UPDATE_AFTER)
-                        .addContainedKind(RowKind.DELETE)
-                        .build();
+        public static final ChangelogMode SINK_CHANGELOG_MODE = ChangelogMode.newBuilder()
+                .addContainedKind(RowKind.INSERT)
+                .addContainedKind(RowKind.UPDATE_AFTER)
+                .addContainedKind(RowKind.DELETE)
+                .build();
 
         public EncodingFormatWrapper(
                 EncodingFormat<SerializationSchema<RowData>> innerEncodingFormat) {

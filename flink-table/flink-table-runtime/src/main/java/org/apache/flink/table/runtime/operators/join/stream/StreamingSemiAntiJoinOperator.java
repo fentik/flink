@@ -51,7 +51,8 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
             JoinInputSideSpec leftInputSideSpec,
             JoinInputSideSpec rightInputSideSpec,
             boolean[] filterNullKeys,
-            long stateRetentionTime) {
+            long stateRetentionTime,
+            boolean batchBackfillEnabled) {
         super(
                 leftType,
                 rightType,
@@ -59,7 +60,8 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
                 leftInputSideSpec,
                 rightInputSideSpec,
                 filterNullKeys,
-                stateRetentionTime);
+                stateRetentionTime,
+                batchBackfillEnabled);
         this.isAntiJoin = isAntiJoin;
     }
 
@@ -73,6 +75,7 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
                         LEFT_RECORDS_STATE_NAME,
                         leftInputSideSpec,
                         leftType,
+                        rightType,
                         stateRetentionTime);
 
         this.rightRecordStateView =
@@ -84,6 +87,9 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
                         stateRetentionTime);
     }
 
+    protected boolean isHybridStreamBatchCapable() {
+        return false;
+    }
     /**
      * Process an input element and output incremental joined records, retraction messages will be
      * sent in some scenarios.

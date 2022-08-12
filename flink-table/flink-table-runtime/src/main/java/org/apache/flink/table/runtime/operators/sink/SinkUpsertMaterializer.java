@@ -52,6 +52,8 @@ import static org.apache.flink.types.RowKind.DELETE;
 import static org.apache.flink.types.RowKind.INSERT;
 import static org.apache.flink.types.RowKind.UPDATE_AFTER;
 
+import org.apache.flink.table.runtime.util.RowDataStringSerializer;
+
 /**
  * An operator that maintains incoming records in state corresponding to the upsert keys and
  * generates an upsert view for the downstream operator.
@@ -77,9 +79,9 @@ public class SinkUpsertMaterializer extends TableStreamOperator<RowData>
     private final StateTtlConfig ttlConfig;
     private final TypeSerializer<RowData> serializer;
     private final GeneratedRecordEqualiser generatedEqualiser;
+    private final RowDataStringSerializer rowStringSerializer;
 
     private transient RecordEqualiser equaliser;
-    private transient RowType physicalRowType;
 
     // Buffer of emitted insertions on which deletions will be applied first.
     // The row kind might be +I or +U and will be ignored when applying the deletion.
@@ -93,7 +95,7 @@ public class SinkUpsertMaterializer extends TableStreamOperator<RowData>
         this.ttlConfig = ttlConfig;
         this.serializer = serializer;
         this.generatedEqualiser = generatedEqualiser;
-        this.physicalRowType = null;
+        this.rowStringSerializer = null;
         LOG.info("WARNING: SinkUpsertMaterializer is being called without the physicalRowType - This reduces what we can log for debugging. See the stacktrace to see if you can fix the caller.");
         String stacktrace = ExceptionUtils.stringifyException((new Exception("Missing RowType information")));
         LOG.info(stacktrace);
@@ -107,14 +109,7 @@ public class SinkUpsertMaterializer extends TableStreamOperator<RowData>
         this.ttlConfig = ttlConfig;
         this.serializer = serializer;
         this.generatedEqualiser = generatedEqualiser;
-        this.physicalRowType = physicalRowType;
-        if (this.physicalRowType == null) {
-            LOG.info("WARNING: SinkUpsertMaterializer is being called without the physicalRowType - This reduces what we can log for debugging. See the stacktrace to see if you can fix the caller.");
-            String stacktrace = ExceptionUtils.stringifyException((new Exception("Missing RowType information")));
-            LOG.info(stacktrace);
-        } else {
-            LOG.info("Initializing SinkUpsertMaterializer with schema for the input row: " + this.physicalRowType.asSummaryString());
-        }
+        this.rowStringSerializer = new RowDataStringSerializer(physicalRowType);
     }
 
     @Override
@@ -202,10 +197,9 @@ public class SinkUpsertMaterializer extends TableStreamOperator<RowData>
             LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: EXPENSIVE update to state value with key " + key + " to values {num entries: " + values.size() + "} with a row of size " + size);
         }
         if (this.shouldLogInput()) {
-            key = row.getString(0).toString();  // Assumes the first column in a string.
-            if (this.physicalRowType != null) {
-                LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with key " + key + "(" + size + ")" + " to values {num entries: " + values.size() + "} : " +
-                this.rowToString(this.physicalRowType, row));
+            if (this.rowStringSerializer!= null) {
+                LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with "
+                    + values.size() + " values : " + rowStringSerializer.asString(row));
             } else {
                 LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with key " + key + "(" + size + ")" + " to values {num entries: " + values.size() + "} : " + element.toString());
             }

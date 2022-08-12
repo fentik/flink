@@ -55,6 +55,8 @@ import java.util.List;
 import static org.apache.flink.util.Preconditions.checkArgument;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
+import org.apache.flink.table.api.config.ExecutionConfigOptions;
+
 /**
  * {@link StreamExecNode} for regular Joins.
  *
@@ -157,6 +159,8 @@ public class StreamExecJoin extends ExecNodeBase<RowData>
 
         long minRetentionTime = config.getStateRetentionTime();
 
+        final boolean isBatchBackfillEnabled = config.get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL);
+
         AbstractStreamingJoinOperator operator;
         FlinkJoinType joinType = joinSpec.getJoinType();
         if (joinType == FlinkJoinType.ANTI || joinType == FlinkJoinType.SEMI) {
@@ -169,7 +173,8 @@ public class StreamExecJoin extends ExecNodeBase<RowData>
                             leftInputSpec,
                             rightInputSpec,
                             joinSpec.getFilterNulls(),
-                            minRetentionTime);
+                            minRetentionTime,
+                            isBatchBackfillEnabled);
         } else {
             boolean leftIsOuter = joinType == FlinkJoinType.LEFT || joinType == FlinkJoinType.FULL;
             boolean rightIsOuter =
@@ -184,7 +189,8 @@ public class StreamExecJoin extends ExecNodeBase<RowData>
                             leftIsOuter,
                             rightIsOuter,
                             joinSpec.getFilterNulls(),
-                            minRetentionTime);
+                            minRetentionTime,
+                            isBatchBackfillEnabled);
         }
 
         final RowType returnType = (RowType) getOutputType();

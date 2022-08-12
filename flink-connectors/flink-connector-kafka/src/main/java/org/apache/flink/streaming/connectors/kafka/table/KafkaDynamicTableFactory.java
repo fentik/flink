@@ -74,6 +74,7 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_TIMESTAMP_MILLIS;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_TOPIC_PARTITION_DISCOVERY;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SINK_PARALLELISM;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SOURCE_PARALLELISM;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SINK_PARTITIONER;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC_PATTERN;
@@ -89,12 +90,16 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getKafkaProperties;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getSourceTopicPattern;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getSourceTopics;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getSourceParallelism;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.getStartupOptions;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.validateTableSinkOptions;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.validateTableSourceOptions;
 
+import org.apache.flink.table.api.config.ExecutionConfigOptions;
+
 /**
- * Factory for creating configured instances of {@link KafkaDynamicSource} and {@link
+ * Factory for creating configured instances of {@link KafkaDynamicSource} and
+ * {@link
  * KafkaDynamicSink}.
  */
 @Internal
@@ -102,11 +107,10 @@ public class KafkaDynamicTableFactory
         implements DynamicTableSourceFactory, DynamicTableSinkFactory {
 
     private static final Logger LOG = LoggerFactory.getLogger(KafkaDynamicTableFactory.class);
-    private static final ConfigOption<String> SINK_SEMANTIC =
-            ConfigOptions.key("sink.semantic")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("Optional semantic when committing.");
+    private static final ConfigOption<String> SINK_SEMANTIC = ConfigOptions.key("sink.semantic")
+            .stringType()
+            .noDefaultValue()
+            .withDescription("Optional semantic when committing.");
 
     public static final String IDENTIFIER = "kafka";
 
@@ -140,6 +144,7 @@ public class KafkaDynamicTableFactory
         options.add(SCAN_STARTUP_TIMESTAMP_MILLIS);
         options.add(SINK_PARTITIONER);
         options.add(SINK_PARALLELISM);
+        options.add(SOURCE_PARALLELISM);
         options.add(DELIVERY_GUARANTEE);
         options.add(TRANSACTIONAL_ID_PREFIX);
         options.add(SINK_SEMANTIC);
@@ -149,17 +154,17 @@ public class KafkaDynamicTableFactory
     @Override
     public Set<ConfigOption<?>> forwardOptions() {
         return Stream.of(
-                        PROPS_BOOTSTRAP_SERVERS,
-                        PROPS_GROUP_ID,
-                        TOPIC,
-                        TOPIC_PATTERN,
-                        SCAN_STARTUP_MODE,
-                        SCAN_STARTUP_SPECIFIC_OFFSETS,
-                        SCAN_TOPIC_PARTITION_DISCOVERY,
-                        SCAN_STARTUP_TIMESTAMP_MILLIS,
-                        SINK_PARTITIONER,
-                        SINK_PARALLELISM,
-                        TRANSACTIONAL_ID_PREFIX)
+                PROPS_BOOTSTRAP_SERVERS,
+                PROPS_GROUP_ID,
+                TOPIC,
+                TOPIC_PATTERN,
+                SCAN_STARTUP_MODE,
+                SCAN_STARTUP_SPECIFIC_OFFSETS,
+                SCAN_TOPIC_PARTITION_DISCOVERY,
+                SCAN_STARTUP_TIMESTAMP_MILLIS,
+                SINK_PARTITIONER,
+                SINK_PARALLELISM,
+                TRANSACTIONAL_ID_PREFIX)
                 .collect(Collectors.toSet());
     }
 
@@ -167,15 +172,18 @@ public class KafkaDynamicTableFactory
     public DynamicTableSource createDynamicTableSource(Context context) {
         final TableFactoryHelper helper = FactoryUtil.createTableFactoryHelper(this, context);
 
-        final Optional<DecodingFormat<DeserializationSchema<RowData>>> keyDecodingFormat =
-                getKeyDecodingFormat(helper);
+        final Optional<DecodingFormat<DeserializationSchema<RowData>>> keyDecodingFormat = getKeyDecodingFormat(helper);
 
-        final DecodingFormat<DeserializationSchema<RowData>> valueDecodingFormat =
-                getValueDecodingFormat(helper);
+        final DecodingFormat<DeserializationSchema<RowData>> valueDecodingFormat = getValueDecodingFormat(helper);
 
         helper.validateExcept(PROPERTIES_PREFIX);
 
         final ReadableConfig tableOptions = helper.getOptions();
+
+        final boolean isBatchBackfillEnabled = context.getConfiguration()
+                .get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL);
+
+        LOG.info("HERE configuration option {}", isBatchBackfillEnabled);
 
         validateTableSourceOptions(tableOptions);
 
@@ -190,8 +198,8 @@ public class KafkaDynamicTableFactory
         final Properties properties = getKafkaProperties(context.getCatalogTable().getOptions());
 
         // add topic-partition discovery
-        final Optional<Long> partitionDiscoveryInterval =
-                tableOptions.getOptional(SCAN_TOPIC_PARTITION_DISCOVERY).map(Duration::toMillis);
+        final Optional<Long> partitionDiscoveryInterval = tableOptions.getOptional(SCAN_TOPIC_PARTITION_DISCOVERY)
+                .map(Duration::toMillis);
         properties.setProperty(
                 KafkaSourceOptions.PARTITION_DISCOVERY_INTERVAL_MS.key(),
                 partitionDiscoveryInterval.orElse(-1L).toString());
@@ -217,20 +225,19 @@ public class KafkaDynamicTableFactory
                 startupOptions.startupMode,
                 startupOptions.specificOffsets,
                 startupOptions.startupTimestampMillis,
+                getSourceParallelism(tableOptions),
+                isBatchBackfillEnabled,
                 context.getObjectIdentifier().asSummaryString());
     }
 
     @Override
     public DynamicTableSink createDynamicTableSink(Context context) {
-        final TableFactoryHelper helper =
-                FactoryUtil.createTableFactoryHelper(
-                        this, autoCompleteSchemaRegistrySubject(context));
+        final TableFactoryHelper helper = FactoryUtil.createTableFactoryHelper(
+                this, autoCompleteSchemaRegistrySubject(context));
 
-        final Optional<EncodingFormat<SerializationSchema<RowData>>> keyEncodingFormat =
-                getKeyEncodingFormat(helper);
+        final Optional<EncodingFormat<SerializationSchema<RowData>>> keyEncodingFormat = getKeyEncodingFormat(helper);
 
-        final EncodingFormat<SerializationSchema<RowData>> valueEncodingFormat =
-                getValueEncodingFormat(helper);
+        final EncodingFormat<SerializationSchema<RowData>> valueEncodingFormat = getValueEncodingFormat(helper);
 
         helper.validateExcept(PROPERTIES_PREFIX);
 
@@ -276,8 +283,8 @@ public class KafkaDynamicTableFactory
 
     private static Optional<DecodingFormat<DeserializationSchema<RowData>>> getKeyDecodingFormat(
             TableFactoryHelper helper) {
-        final Optional<DecodingFormat<DeserializationSchema<RowData>>> keyDecodingFormat =
-                helper.discoverOptionalDecodingFormat(
+        final Optional<DecodingFormat<DeserializationSchema<RowData>>> keyDecodingFormat = helper
+                .discoverOptionalDecodingFormat(
                         DeserializationFormatFactory.class, KEY_FORMAT);
         keyDecodingFormat.ifPresent(
                 format -> {
@@ -295,8 +302,8 @@ public class KafkaDynamicTableFactory
 
     private static Optional<EncodingFormat<SerializationSchema<RowData>>> getKeyEncodingFormat(
             TableFactoryHelper helper) {
-        final Optional<EncodingFormat<SerializationSchema<RowData>>> keyEncodingFormat =
-                helper.discoverOptionalEncodingFormat(SerializationFormatFactory.class, KEY_FORMAT);
+        final Optional<EncodingFormat<SerializationSchema<RowData>>> keyEncodingFormat = helper
+                .discoverOptionalEncodingFormat(SerializationFormatFactory.class, KEY_FORMAT);
         keyEncodingFormat.ifPresent(
                 format -> {
                     if (!format.getChangelogMode().containsOnly(RowKind.INSERT)) {
@@ -314,21 +321,19 @@ public class KafkaDynamicTableFactory
     private static DecodingFormat<DeserializationSchema<RowData>> getValueDecodingFormat(
             TableFactoryHelper helper) {
         return helper.discoverOptionalDecodingFormat(
-                        DeserializationFormatFactory.class, FactoryUtil.FORMAT)
+                DeserializationFormatFactory.class, FactoryUtil.FORMAT)
                 .orElseGet(
-                        () ->
-                                helper.discoverDecodingFormat(
-                                        DeserializationFormatFactory.class, VALUE_FORMAT));
+                        () -> helper.discoverDecodingFormat(
+                                DeserializationFormatFactory.class, VALUE_FORMAT));
     }
 
     private static EncodingFormat<SerializationSchema<RowData>> getValueEncodingFormat(
             TableFactoryHelper helper) {
         return helper.discoverOptionalEncodingFormat(
-                        SerializationFormatFactory.class, FactoryUtil.FORMAT)
+                SerializationFormatFactory.class, FactoryUtil.FORMAT)
                 .orElseGet(
-                        () ->
-                                helper.discoverEncodingFormat(
-                                        SerializationFormatFactory.class, VALUE_FORMAT));
+                        () -> helper.discoverEncodingFormat(
+                                SerializationFormatFactory.class, VALUE_FORMAT));
     }
 
     private static void validatePKConstraints(
@@ -339,10 +344,9 @@ public class KafkaDynamicTableFactory
         if (primaryKeyIndexes.length > 0
                 && format.getChangelogMode().containsOnly(RowKind.INSERT)) {
             Configuration configuration = Configuration.fromMap(options);
-            String formatName =
-                    configuration
-                            .getOptional(FactoryUtil.FORMAT)
-                            .orElse(configuration.get(VALUE_FORMAT));
+            String formatName = configuration
+                    .getOptional(FactoryUtil.FORMAT)
+                    .orElse(configuration.get(VALUE_FORMAT));
             throw new ValidationException(
                     String.format(
                             "The Kafka table '%s' with '%s' format doesn't support defining PRIMARY KEY constraint"
@@ -378,6 +382,8 @@ public class KafkaDynamicTableFactory
             StartupMode startupMode,
             Map<KafkaTopicPartition, Long> specificStartupOffsets,
             long startupTimestampMillis,
+            int sourceParallelism,
+            boolean isBatchBackfillEnabled,
             String tableIdentifier) {
         return new KafkaDynamicSource(
                 physicalDataType,
@@ -393,6 +399,8 @@ public class KafkaDynamicTableFactory
                 specificStartupOffsets,
                 startupTimestampMillis,
                 false,
+                sourceParallelism,
+                isBatchBackfillEnabled,
                 tableIdentifier);
     }
 

@@ -44,11 +44,17 @@ import org.apache.flink.types.Row;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.util.Collector;
 import org.apache.flink.table.types.utils.TypeConversions;
+import org.apache.flink.streaming.api.watermark.Watermark;
+
+
 
 import java.util.Arrays;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
+
+import org.apache.flink.table.runtime.util.RowDataStringSerializer;
 
 /**
  * Abstract implementation for streaming unbounded Join operator which defines some member fields
@@ -76,6 +82,9 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
     protected transient JoinConditionWithNullFilters joinCondition;
     protected transient TimestampedCollector<RowData> collector;
 
+    protected boolean isBatchBackfillEnabled;
+    private boolean isStreamMode = true;
+
     public AbstractStreamingJoinOperator(
             InternalTypeInfo<RowData> leftType,
             InternalTypeInfo<RowData> rightType,
@@ -83,7 +92,8 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
             JoinInputSideSpec leftInputSideSpec,
             JoinInputSideSpec rightInputSideSpec,
             boolean[] filterNullKeys,
-            long stateRetentionTime) {
+            long stateRetentionTime,
+            boolean isBatchBackfillEnabled) {
         this.leftType = leftType;
         this.rightType = rightType;
         this.generatedJoinCondition = generatedJoinCondition;
@@ -91,6 +101,8 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
         this.rightInputSideSpec = rightInputSideSpec;
         this.stateRetentionTime = stateRetentionTime;
         this.filterNullKeys = filterNullKeys;
+        this.isBatchBackfillEnabled = isBatchBackfillEnabled;
+        this.isStreamMode = true;
     }
 
     @Override
@@ -103,6 +115,48 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
         this.joinCondition.open(new Configuration());
 
         this.collector = new TimestampedCollector<>(output);
+
+        if (!isHybridStreamBatchCapable()) {
+            LOG.info("{} not stream batch capable", getPrintableName());
+        } else if (isBatchBackfillEnabled) {
+            this.isStreamMode = false;
+            LOG.info("Initializing batch capable {} in BATCH mode", getPrintableName());
+        } else {
+            this.isStreamMode = true;
+            LOG.info("Initializing batch capable {} in STREAMING mode", getPrintableName());
+        }
+    }
+
+    protected String getPrintableName() {
+        return getRuntimeContext().getJobId() + " " + getRuntimeContext().getTaskName();
+    }
+
+    protected abstract boolean isHybridStreamBatchCapable();
+
+    protected boolean isBatchMode() {
+        return !isStreamMode;
+    }
+
+    protected void setStreamMode(boolean mode) {
+        isStreamMode = mode;
+    }
+
+    protected void emitStateAndSwitchToStreaming() throws Exception {
+        throw new Exception(getPrintableName() + ": programming error does not support batch mode");
+    }
+
+    public void processWatermark(Watermark mark) throws Exception {
+        if (isBatchMode()) {
+            // we are in batch mode, do not re-emit watermark until we flip
+            if (mark.getTimestamp() == Watermark.MAX_WATERMARK.getTimestamp()) {
+                // We've reached the end of the stream, emit and forward watermark
+                emitStateAndSwitchToStreaming();
+                super.processWatermark(mark);
+            }
+        } else {
+            // We are in streaming mode, default to standard watermark processing code
+            super.processWatermark(mark);
+        }
     }
 
     @Override
@@ -111,65 +165,6 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
         if (joinCondition != null) {
             joinCondition.close();
         }
-    }
-
-    // TODO(akhilg): This is an exact copy of a function in SinkUpsertMaterializer.java. When you are getting
-    // bored, figure out which class/interface can be put this function in and re-use between these two classes.
-    protected static String rowToString(RowType type, RowData row) {
-        LogicalType[] fieldTypes =
-                type.getFields().stream()
-                        .map(RowType.RowField::getType)
-                        .toArray(LogicalType[]::new);
-        String[] fieldNames = type.getFieldNames().toArray(new String[0]);
-        int rowArity = type.getFieldCount();
-        String rowString = "";
-        for (int i = 0; i < rowArity; i++) {
-            String value = "";
-            if (row.isNullAt(i)) {
-                value = "<NULL>";
-            } else {
-                switch (fieldTypes[i].getTypeRoot()) {
-                        case NULL:
-                            value = "<NULL>";
-                            break;
-
-                        case BOOLEAN:
-                            value = row.getBoolean(i) ? "True" : "False";
-                            break;
-
-                        case INTEGER:
-                        case INTERVAL_YEAR_MONTH:
-                            value = Integer.toString(row.getInt(i));
-                            break;
-
-                        case BIGINT:
-                        case INTERVAL_DAY_TIME:
-                            value = Long.toString(row.getLong(i));
-                            break;
-
-                        case CHAR:
-                        case VARCHAR:
-                            value = row.getString(i).toString();
-                            break;
-
-                        case DATE:
-                            value = "[DATE TYPE]";
-                            break;
-
-                        default:
-                            value = "[Unprocessed type]";
-                            break;
-                }
-            }
-            String field = fieldNames[i] + "=" + value;
-            rowString = rowString + field + (i == rowArity - 1 ? "" : ", ");
-        }
-        return rowString;
-    }
-
-    protected static String rowToString(InternalTypeInfo<RowData> internalTypes, RowData row) {
-        RowType type = internalTypes.toRowType();
-        return rowToString(type, row);
     }
 
     /**
@@ -234,8 +229,10 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
                 JoinCondition condition)
                 throws Exception {
             List<OuterRecord> associations = new ArrayList<>();
-	    int rows_fetched = 0;
-	    int rows_matched = 0;
+            int rows_fetched = 0;
+            int rows_matched = 0;
+
+
             if (otherSideStateView instanceof OuterJoinRecordStateView) {
                 OuterJoinRecordStateView outerStateView =
                         (OuterJoinRecordStateView) otherSideStateView;
@@ -253,9 +250,10 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
                         }
                     }
             		if ((rows_fetched > 1000 || rows_fetched - rows_matched > 500) && leftType != null && rightType != null) {
-		            LOG.info(operator_name + ": EXPENSIVE Outer Join fetched: " + rows_fetched + ", matched " + rows_matched);
-		            LOG.info(operator_name + ": EXPENSIVE joining " + (inputIsLeft ? " left input: " : "right input: ") + rowToString(inputIsLeft ? leftType : rightType, input));
-        		}
+                        RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(inputIsLeft ? leftType : rightType);
+		                LOG.info(operator_name + ": EXPENSIVE Outer Join fetched: " + rows_fetched + ", matched " + rows_matched);
+		                LOG.info(operator_name + ": EXPENSIVE joining " + (inputIsLeft ? " left input: " : "right input: ") + rowStringSerializer.asString(input));
+        		    }
             } else {
                 Iterable<RowData> records = otherSideStateView.getRecords();
                 for (RowData record : records) {
@@ -272,8 +270,9 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
                     }
                 }
 		        if ((rows_fetched > 1000 || rows_fetched - rows_matched > 500)  && leftType != null && rightType != null) {
+                    RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(inputIsLeft ? leftType : rightType);
 		            LOG.info(operator_name + ": EXPENSIVE Inner Join fetched: " + rows_fetched + ", matched " + rows_matched);
-        		    LOG.info(operator_name + ": EXPENSIVE Joining " + (inputIsLeft ? " left input: " : "right input: ") + rowToString(inputIsLeft ? leftType : rightType, input));
+        		    LOG.info(operator_name + ": EXPENSIVE Joining " + (inputIsLeft ? " left input: " : "right input: ") + rowStringSerializer.asString(input));
                 }
             }
             return new AssociatedRecords(associations);
