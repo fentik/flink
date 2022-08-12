@@ -101,7 +101,7 @@ public class KeyedProcessOperator<K, IN, OUT>
 
         if (userFunction.isBatchMode()) {
             // we are in batch mode, do not re-emit watermark until we flip
-            if (mark.getTimestamp() >= userFunction.getBackfillWatermark().getTimestamp()) {
+            if (mark.getTimestamp() == Watermark.MAX_WATERMARK.getTimestamp()) {
                 userFunction.emitStateAndSwitchToStreaming(context, collector, getKeyedStateBackend());
                 super.processWatermark(mark);
             }

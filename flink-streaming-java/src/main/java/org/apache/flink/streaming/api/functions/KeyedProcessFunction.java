@@ -106,10 +106,6 @@ public abstract class KeyedProcessFunction<K, I, O> extends AbstractRichFunction
         return false;
     }
 
-    public Watermark getBackfillWatermark() {
-        return defaultWatermark;
-    }
-
     /**
      * Called when a timer set using {@link TimerService} fires.
      *
