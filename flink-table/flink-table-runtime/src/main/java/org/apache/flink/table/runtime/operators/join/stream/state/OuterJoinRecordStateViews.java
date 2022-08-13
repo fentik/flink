@@ -167,9 +167,8 @@ public final class OuterJoinRecordStateViews {
             return reusedTupleList;
         }
 
-        @Override
-        public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-                JoinRecordStateView otherView, JoinCondition condition) throws Exception {
+        private void emitState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
+                JoinRecordStateView otherView, JoinCondition condition, boolean isAntiJoin) throws Exception {
             TupleTypeInfo<Tuple2<RowData, Integer>> valueTypeInfo = new TupleTypeInfo<>(recordType, Types.INT);
             ValueStateDescriptor<Tuple2<RowData, Integer>> recordStateDesc = new ValueStateDescriptor<>(stateName,
                     valueTypeInfo);
@@ -195,7 +194,10 @@ public final class OuterJoinRecordStateViews {
                             boolean matched = condition.apply(thisRow, otherRow);
                             outRow.replace(thisRow, otherRow);
                             if (matched) {
-                                collect.collect(outRow);
+                                if (!isAntiJoin) {
+                                    // with AntiJoin, we do not emit any matching records
+                                    collect.collect(outRow);
+                                }
                                 rowsMatched++;
                             }
                         }
@@ -206,6 +208,18 @@ public final class OuterJoinRecordStateViews {
                         }
                     }
                 });
+        }
+
+        @Override
+        public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
+                JoinRecordStateView otherView, JoinCondition condition) throws Exception {
+            emitState(be, collect, otherView, condition, false);
+        }
+
+        @Override
+        public void emitAntiJoinState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
+                JoinRecordStateView otherView, JoinCondition condition) throws Exception {
+            emitState(be, collect, otherView, condition, true);
         }
     }
 
@@ -278,9 +292,8 @@ public final class OuterJoinRecordStateViews {
             return recordState.values();
         }
 
-        @Override
-        public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-                JoinRecordStateView otherView, JoinCondition condition) throws Exception {
+        private void emitState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
+                JoinRecordStateView otherView, JoinCondition condition, boolean isAntiJoin) throws Exception {
             TupleTypeInfo<Tuple2<RowData, Integer>> valueTypeInfo = new TupleTypeInfo<>(recordType, Types.INT);
             MapStateDescriptor<RowData, Tuple2<RowData, Integer>> recordStateDesc = new MapStateDescriptor<>(stateName,
                     uniqueKeyType, valueTypeInfo);
@@ -306,7 +319,10 @@ public final class OuterJoinRecordStateViews {
 
                                 if (matched) {
                                     outRow.replace(thisRow, otherRow);
-                                    collect.collect(outRow);
+                                    if (!isAntiJoin) {
+                                        // with AntiJoin, we do not emit any matching records
+                                        collect.collect(outRow);
+                                    }
                                     rowsMatched++;
                                 }
                             }
@@ -317,6 +333,18 @@ public final class OuterJoinRecordStateViews {
                         }
                     }
                 });
+        }
+
+        @Override
+        public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
+                JoinRecordStateView otherView, JoinCondition condition) throws Exception {
+            emitState(be, collect, otherView, condition, false);
+        }
+
+        @Override
+        public void emitAntiJoinState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
+                JoinRecordStateView otherView, JoinCondition condition) throws Exception {
+            emitState(be, collect, otherView, condition, true);
         }
     }
 
@@ -430,9 +458,9 @@ public final class OuterJoinRecordStateViews {
             };
         }
 
-        @Override
-        public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-                JoinRecordStateView otherView, JoinCondition condition) throws Exception {
+
+        private void emitState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
+                JoinRecordStateView otherView, JoinCondition condition, boolean isAntiJoin) throws Exception {
             TupleTypeInfo<Tuple2<Integer, Integer>> tupleTypeInfo = new TupleTypeInfo<>(Types.INT, Types.INT);
             MapStateDescriptor<RowData, Tuple2<Integer, Integer>> recordStateDesc = new MapStateDescriptor<>(stateName,
                     recordType, tupleTypeInfo);
@@ -458,7 +486,10 @@ public final class OuterJoinRecordStateViews {
 
                                 if (matched) {
                                     outRow.replace(thisRow, otherRow);
-                                    collect.collect(outRow);
+                                    if (!isAntiJoin) {
+                                        // with AntiJoin, we do not emit any matching records
+                                        collect.collect(outRow);
+                                    }
                                     rowsMatched++;
                                 }
                             }
@@ -469,6 +500,18 @@ public final class OuterJoinRecordStateViews {
                         }
                     }
                 });
+        }
+
+        @Override
+        public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
+                JoinRecordStateView otherView, JoinCondition condition) throws Exception {
+            emitState(be, collect, otherView, condition, false);
+        }
+
+        @Override
+        public void emitAntiJoinState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
+                JoinRecordStateView otherView, JoinCondition condition) throws Exception {
+            emitState(be, collect, otherView, condition, true);
         }
     }
 

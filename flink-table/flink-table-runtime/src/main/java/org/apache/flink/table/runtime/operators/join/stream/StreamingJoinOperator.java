@@ -108,13 +108,6 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                 "associated_records_size_sum_rate",
                 new MeterView(this.associatedRecordsSizeSum));
 
-        if (leftIsOuter && rightIsOuter) {
-            // we don't support FULL OUTER yet
-            LOG.info("{} FULL OUTER batch mode not supported", getPrintableName());
-            isBatchBackfillEnabled = false;
-            setStreamMode(true);
-        }
-
         // initialize states
         if (leftIsOuter) {
             this.leftRecordStateView = OuterJoinRecordStateViews.create(
@@ -169,8 +162,27 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
     @Override
     protected void emitStateAndSwitchToStreaming() throws Exception {
         LOG.info("{} emit and switch to streaming", getPrintableName());
-        leftRecordStateView.emitCompleteState(getKeyedStateBackend(), this.collector,
-            rightRecordStateView, joinCondition);
+        if (leftIsOuter) {
+            leftRecordStateView.emitCompleteState(getKeyedStateBackend(), this.collector,
+                rightRecordStateView, joinCondition);
+            if (rightIsOuter) {
+                // FULL JOIN condition, we want to emit the following
+                // leftState -> emitComplete
+                // rightState -> emitAntiJoin (everything in right that doesn't match left)
+                OuterJoinRecordStateView rightView = (OuterJoinRecordStateView) rightRecordStateView;
+                rightView.emitAntiJoinState(getKeyedStateBackend(), this.collector,
+                    leftRecordStateView, joinCondition);
+            }
+        } else if (rightIsOuter) {
+            // RIGHT OUTER JOIN
+            rightRecordStateView.emitCompleteState(getKeyedStateBackend(), this.collector,
+                leftRecordStateView, joinCondition);
+        } else {
+            // standard inner join
+            leftRecordStateView.emitCompleteState(getKeyedStateBackend(), this.collector,
+                rightRecordStateView, joinCondition);
+        }
+
         setStreamMode(true);
     }
 
