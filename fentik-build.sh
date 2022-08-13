@@ -3,6 +3,8 @@
 # To clean EVERYTHING:
 # git clean -fdx
 
+FLINK_BASE=flink-1.15.0-rc1
+
 pushd fentik-udf
 mvn install -DskipTests -Dfast
 popd
@@ -10,7 +12,7 @@ popd
 mvn install -DskipTests -Dfast
 
 # Copy some required libraries that are not part of the core Flink distribution.
-FLINK_DIR="/opt/flink-1.15.0-rc1"
+FLINK_DIR="/opt/${FLINK_BASE}"
 LIB_DIR="$FLINK_DIR/lib/"
 OPT_DIR="$FLINK_DIR/opt/"
 
@@ -27,9 +29,9 @@ mkdir -p $FLINK_DIR/plugins/s3-fs-presto
 cp ./flink-filesystems/flink-s3-fs-presto/target/flink-s3-fs-presto-1.15.0.jar $FLINK_DIR/plugins/s3-fs-presto/
 
 # Build a Flink binary.
-echo "Building Flink binary at /opt/flink-1.15.0-rc1.tar.gz"
-rm -f /opt/flink-1.15.0-rc1/log/rocksdb/* /opt/flink-1.15.0-rc1/log/*
+echo "Building Flink binary at /opt/${FLINK_BASE}.tar.gz"
+find /opt/${FLINK_BASE}/log -type f | xargs rm -f
 pushd /opt
-rm -f flink-1.15.0-rc1.tar.gz
-tar zcfh flink-1.15.0-rc1.tar.gz flink-1.15.0-rc1
+rm -f ${FLINK_BASE}.tar.gz
+tar zcfh ${FLINK_BASE}.tar.gz ${FLINK_BASE}
 popd
