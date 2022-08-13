@@ -170,7 +170,9 @@ public final class OuterJoinRecordStateViews {
         @Override
         public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
                 JoinRecordStateView otherView, JoinCondition condition) throws Exception {
-            ValueStateDescriptor<RowData> recordStateDesc = new ValueStateDescriptor<>(stateName, recordType);
+            TupleTypeInfo<Tuple2<RowData, Integer>> valueTypeInfo = new TupleTypeInfo<>(recordType, Types.INT);
+            ValueStateDescriptor<Tuple2<RowData, Integer>> recordStateDesc = new ValueStateDescriptor<>(stateName,
+                    valueTypeInfo);
 
             JoinedRowData outRow = new JoinedRowData();
             outRow.setRowKind(RowKind.INSERT);
@@ -178,10 +180,11 @@ public final class OuterJoinRecordStateViews {
             be.applyToAllKeys(VoidNamespace.INSTANCE,
                 VoidNamespaceSerializer.INSTANCE,
                 recordStateDesc,
-                new KeyedStateFunction<RowData, ValueState<RowData>>() {
+                new KeyedStateFunction<RowData, ValueState<Tuple2<RowData, Integer> >>() {
                     @Override
-                    public void process(RowData key, ValueState<RowData> state) throws Exception {
-                        RowData thisRow = state.value();
+                    public void process(RowData key, ValueState<Tuple2<RowData, Integer>> state) throws Exception {
+                        Tuple2<RowData, Integer>  record = state.value();
+                        RowData thisRow = record.f0;
 
                         // set current key context for otherView fetch
                         be.setCurrentKey(key);
