@@ -51,5 +51,5 @@ public interface JoinRecordStateView {
 
     /** Emit join state */
     void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-        JoinRecordStateView otherView, JoinCondition condition) throws Exception;
+        JoinRecordStateView otherView, JoinCondition condition, boolean leftRowOnly) throws Exception;
 }

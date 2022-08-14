@@ -87,9 +87,26 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
                         stateRetentionTime);
     }
 
+    @Override
     protected boolean isHybridStreamBatchCapable() {
-        return false;
+        return true;
     }
+
+    @Override
+    protected void emitStateAndSwitchToStreaming() throws Exception {
+        LOG.info("{} emit and switch to streaming", getPrintableName());
+        if (isAntiJoin) {
+            // Left Anti Join
+            leftRecordStateView.emitAntiJoinState(getKeyedStateBackend(), this.collector,
+                rightRecordStateView, joinCondition, true);
+        } else {
+            // Left Semi Join
+            leftRecordStateView.emitCompleteState(getKeyedStateBackend(), this.collector,
+                rightRecordStateView, joinCondition, true);
+        }
+        setStreamMode(true);
+    }
+
     /**
      * Process an input element and output incremental joined records, retraction messages will be
      * sent in some scenarios.
@@ -112,10 +129,12 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
                 AssociatedRecords.of(input, true, rightRecordStateView, joinCondition);
         if (associatedRecords.isEmpty()) {
             if (isAntiJoin) {
-                collector.collect(input);
+                if (!isBatchMode()) {
+                    collector.collect(input);
+                }
             }
         } else { // there are matched rows on the other side
-            if (!isAntiJoin) {
+            if (!isAntiJoin && !isBatchMode()) {
                 collector.collect(input);
             }
         }
@@ -188,7 +207,9 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
                             // send +I/+U[other] (using input RowKind)
                             other.setRowKind(inputRowKind);
                         }
-                        collector.collect(other);
+                        if (!isBatchMode()) {
+                            collector.collect(other);
+                        }
                         // set header back to INSERT, because we will update the other row to state
                         other.setRowKind(RowKind.INSERT);
                     } // ignore when number > 0
@@ -210,7 +231,9 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
                             // send +I[other]
                             other.setRowKind(RowKind.INSERT);
                         }
-                        collector.collect(other);
+                        if (!isBatchMode()) {
+                            collector.collect(other);
+                        }
                         // set RowKind back, because we will update the other row to state
                         other.setRowKind(RowKind.INSERT);
                     } // ignore when number > 0
