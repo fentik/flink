@@ -131,7 +131,12 @@ public final class JoinRecordStateViews {
 
         @Override
         public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-                JoinRecordStateView otherView, JoinCondition condition) throws Exception {
+                JoinRecordStateView otherView, JoinCondition condition, boolean leftRowOnly) throws Exception {
+            emitCompleteState(be, collect, otherView, condition);
+        }
+
+        private void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
+        JoinRecordStateView otherView, JoinCondition condition) throws Exception {
             ValueStateDescriptor<RowData> recordStateDesc = new ValueStateDescriptor<>(stateName, recordType);
 
             JoinedRowData outRow = new JoinedRowData();
@@ -210,6 +215,11 @@ public final class JoinRecordStateViews {
 
         @Override
         public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
+                JoinRecordStateView otherView, JoinCondition condition, boolean leftRowOnly) throws Exception {
+            emitCompleteState(be, collect, otherView, condition);
+        }
+
+        private void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
                 JoinRecordStateView otherView, JoinCondition condition) throws Exception {
             MapStateDescriptor<RowData, RowData> recordStateDesc = new MapStateDescriptor<>(stateName, uniqueKeyType,
                     recordType);
@@ -323,6 +333,11 @@ public final class JoinRecordStateViews {
 
         @Override
         public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
+                JoinRecordStateView otherView, JoinCondition condition, boolean leftRowOnly) throws Exception {
+            emitCompleteState(be, collect, otherView, condition);
+        }
+
+        private void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
                 JoinRecordStateView otherView, JoinCondition condition) throws Exception {
             MapStateDescriptor<RowData, Integer> recordStateDesc = new MapStateDescriptor<>(stateName, recordType,
                     Types.INT);
