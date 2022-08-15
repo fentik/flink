@@ -58,7 +58,10 @@ import java.util.Set;
 import java.util.StringJoiner;
 import java.util.stream.Collectors;
 
-/** A {@link SplitReader} implementation that reads records from Kafka partitions. */
+/**
+ * A {@link SplitReader} implementation that reads records from Kafka
+ * partitions.
+ */
 @Internal
 public class KafkaPartitionSplitReader
         implements SplitReader<ConsumerRecord<byte[], byte[]>, KafkaPartitionSplit> {
@@ -96,25 +99,33 @@ public class KafkaPartitionSplitReader
     @Override
     public RecordsWithSplitIds<ConsumerRecord<byte[], byte[]>> fetch() throws IOException {
         ConsumerRecords<byte[], byte[]> consumerRecords;
-        try {
-            consumerRecords = consumer.poll(Duration.ofMillis(POLL_TIMEOUT));
-        } catch (WakeupException we) {
-            return new KafkaPartitionSplitRecords(
-                    ConsumerRecords.empty(), kafkaSourceReaderMetrics);
+
+        if (consumer.assignment().isEmpty()) {
+            // In cases where we have small inputs with empty partitions, it's possible
+            // to have no data in any of tem. The consume.poll() below will fail with
+            // an InvalidState exception in such cases, so do the check here first.
+            consumerRecords = ConsumerRecords.empty();
+        } else {
+            try {
+                consumerRecords = consumer.poll(Duration.ofMillis(POLL_TIMEOUT));
+            } catch (WakeupException we) {
+                return new KafkaPartitionSplitRecords(
+                        ConsumerRecords.empty(), kafkaSourceReaderMetrics);
+            }
         }
-        KafkaPartitionSplitRecords recordsBySplits =
-                new KafkaPartitionSplitRecords(consumerRecords, kafkaSourceReaderMetrics);
+        KafkaPartitionSplitRecords recordsBySplits = new KafkaPartitionSplitRecords(consumerRecords,
+                kafkaSourceReaderMetrics);
         List<TopicPartition> finishedPartitions = new ArrayList<>();
         for (TopicPartition tp : consumerRecords.partitions()) {
             long stoppingOffset = getStoppingOffset(tp);
-            final List<ConsumerRecord<byte[], byte[]>> recordsFromPartition =
-                    consumerRecords.records(tp);
+            final List<ConsumerRecord<byte[], byte[]>> recordsFromPartition = consumerRecords.records(tp);
 
             if (recordsFromPartition.size() > 0) {
-                final ConsumerRecord<byte[], byte[]> lastRecord =
-                        recordsFromPartition.get(recordsFromPartition.size() - 1);
+                final ConsumerRecord<byte[], byte[]> lastRecord = recordsFromPartition
+                        .get(recordsFromPartition.size() - 1);
 
-                // After processing a record with offset of "stoppingOffset - 1", the split reader
+                // After processing a record with offset of "stoppingOffset - 1", the split
+                // reader
                 // should not continue fetching because the record with stoppingOffset may not
                 // exist. Keep polling will just block forever.
                 if (lastRecord.offset() >= stoppingOffset - 1) {
@@ -131,8 +142,10 @@ public class KafkaPartitionSplitReader
             kafkaSourceReaderMetrics.maybeAddRecordsLagMetric(consumer, tp);
         }
 
-        // Some splits are discovered as empty when handling split additions. These splits should be
-        // added to finished splits to clean up states in split fetcher and source reader.
+        // Some splits are discovered as empty when handling split additions. These
+        // splits should be
+        // added to finished splits to clean up states in split fetcher and source
+        // reader.
         if (!emptySplits.isEmpty()) {
             recordsBySplits.finishedSplits.addAll(emptySplits);
             emptySplits.clear();
@@ -199,7 +212,8 @@ public class KafkaPartitionSplitReader
         // Setup the stopping offsets.
         acquireAndSetStoppingOffsets(partitionsStoppingAtLatest, partitionsStoppingAtCommitted);
 
-        // After acquiring the starting and stopping offsets, remove the empty splits if necessary.
+        // After acquiring the starting and stopping offsets, remove the empty splits if
+        // necessary.
         removeEmptySplits();
 
         maybeLogSplitChangesHandlingResult(splitsChange);
@@ -388,11 +402,10 @@ public class KafkaPartitionSplitReader
             Properties props,
             KafkaSourceReaderMetrics kafkaSourceReaderMetrics,
             KafkaConsumer<?, ?> consumer) {
-        final Boolean needToRegister =
-                KafkaSourceOptions.getOption(
-                        props,
-                        KafkaSourceOptions.REGISTER_KAFKA_CONSUMER_METRICS,
-                        Boolean::parseBoolean);
+        final Boolean needToRegister = KafkaSourceOptions.getOption(
+                props,
+                KafkaSourceOptions.REGISTER_KAFKA_CONSUMER_METRICS,
+                Boolean::parseBoolean);
         if (needToRegister) {
             kafkaSourceReaderMetrics.registerKafkaConsumerMetrics(consumer);
         }
@@ -434,8 +447,7 @@ public class KafkaPartitionSplitReader
             if (splitIterator.hasNext()) {
                 currentTopicPartition = splitIterator.next();
                 recordIterator = consumerRecords.records(currentTopicPartition).iterator();
-                currentSplitStoppingOffset =
-                        stoppingOffsets.getOrDefault(currentTopicPartition, Long.MAX_VALUE);
+                currentSplitStoppingOffset = stoppingOffsets.getOrDefault(currentTopicPartition, Long.MAX_VALUE);
                 return currentTopicPartition.toString();
             } else {
                 currentTopicPartition = null;
