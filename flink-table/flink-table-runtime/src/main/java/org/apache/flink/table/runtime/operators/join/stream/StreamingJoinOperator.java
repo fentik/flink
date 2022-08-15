@@ -164,23 +164,24 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         LOG.info("{} emit and switch to streaming", getPrintableName());
         if (leftIsOuter) {
             leftRecordStateView.emitCompleteState(getKeyedStateBackend(), this.collector,
-                rightRecordStateView, joinCondition, false);
+                rightRecordStateView, joinCondition, false, true /* inputIsLeft */);
             if (rightIsOuter) {
                 // FULL JOIN condition, we want to emit the following
                 // leftState -> emitComplete
                 // rightState -> emitAntiJoin (everything in right that doesn't match left)
+
                 OuterJoinRecordStateView rightView = (OuterJoinRecordStateView) rightRecordStateView;
                 rightView.emitAntiJoinState(getKeyedStateBackend(), this.collector,
-                    leftRecordStateView, joinCondition, false);
+                    leftRecordStateView, joinCondition, false, false /* inputIsLeft */);
             }
         } else if (rightIsOuter) {
             // RIGHT OUTER JOIN
             rightRecordStateView.emitCompleteState(getKeyedStateBackend(), this.collector,
-                leftRecordStateView, joinCondition, false);
+                leftRecordStateView, joinCondition, false, false /* inputIsLeft */);
         } else {
             // standard inner join
             leftRecordStateView.emitCompleteState(getKeyedStateBackend(), this.collector,
-                rightRecordStateView, joinCondition, false);
+                rightRecordStateView, joinCondition, false, true /* inputIsLeft */);
         }
 
         setStreamMode(true);

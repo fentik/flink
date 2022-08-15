@@ -98,11 +98,11 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
         if (isAntiJoin) {
             // Left Anti Join
             leftRecordStateView.emitAntiJoinState(getKeyedStateBackend(), this.collector,
-                rightRecordStateView, joinCondition, true);
+                rightRecordStateView, joinCondition, true, true);
         } else {
             // Left Semi Join
             leftRecordStateView.emitCompleteState(getKeyedStateBackend(), this.collector,
-                rightRecordStateView, joinCondition, true);
+                rightRecordStateView, joinCondition, true, true);
         }
         setStreamMode(true);
     }

@@ -131,7 +131,8 @@ public final class JoinRecordStateViews {
 
         @Override
         public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-                JoinRecordStateView otherView, JoinCondition condition, boolean leftRowOnly) throws Exception {
+                JoinRecordStateView otherView, JoinCondition condition, boolean leftRowOnly,
+                boolean inputIsLeft) throws Exception {
             emitCompleteState(be, collect, otherView, condition);
         }
 
@@ -215,7 +216,8 @@ public final class JoinRecordStateViews {
 
         @Override
         public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-                JoinRecordStateView otherView, JoinCondition condition, boolean leftRowOnly) throws Exception {
+                JoinRecordStateView otherView, JoinCondition condition, boolean leftRowOnly,
+                boolean inputIsLeft) throws Exception {
             emitCompleteState(be, collect, otherView, condition);
         }
 
@@ -333,7 +335,8 @@ public final class JoinRecordStateViews {
 
         @Override
         public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-                JoinRecordStateView otherView, JoinCondition condition, boolean leftRowOnly) throws Exception {
+                JoinRecordStateView otherView, JoinCondition condition, boolean leftRowOnly,
+                boolean inputIsLeft) throws Exception {
             emitCompleteState(be, collect, otherView, condition);
         }
 

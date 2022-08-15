@@ -60,5 +60,6 @@ public interface OuterJoinRecordStateView extends JoinRecordStateView {
 
     /** Emit anti join state */
     void emitAntiJoinState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-        JoinRecordStateView otherView, JoinCondition condition, boolean leftRowOnly) throws Exception;
+        JoinRecordStateView otherView, JoinCondition condition, boolean inputRowOnly,
+        boolean inputIsLeft) throws Exception;
 }
