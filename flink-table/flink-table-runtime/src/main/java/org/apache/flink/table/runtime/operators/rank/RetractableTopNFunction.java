@@ -315,7 +315,7 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
                         throw new RuntimeException(STATE_CLEARED_WARN_MSG);
                     }
                 } else {
-                    LOG.warn("Attempt to retract non-existed record {}", inputRowSerializer.asString(input));
+                    LOG.warn("Attempt to retract non-existed record {}"); //, inputRowSerializer.asString(input));
                     // throw new RuntimeException(
                     // "Can not retract a non-existent record. This should never happen.");
                 }
