@@ -201,7 +201,16 @@ public final class OuterJoinRecordStateViews {
                             boolean matched = inputIsLeft
                                 ? condition.apply(thisRow, otherRow)
                                 : condition.apply(otherRow, thisRow);
+
                             if (matched) {
+                                if (inputIsLeft) {
+                                    outRow.replace(thisRow, otherRow);
+                                } else {
+                                    outRow.replace(otherRow, thisRow);
+                                }
+                                collect.collect(outRow);
+                                rowsMatched++;
+                            } else {
                                 if (inputIsLeft) {
                                     outRow.replace(thisRow, otherNullRow);
                                 } else {
@@ -217,7 +226,6 @@ public final class OuterJoinRecordStateViews {
                                         collect.collect(outRow);
                                     }
                                 }
-                                rowsMatched++;
                             }
                         }
 
@@ -354,12 +362,21 @@ public final class OuterJoinRecordStateViews {
                             RowData thisRow = entry.getValue().f0;
                             Iterable<RowData> records = otherView.getRecords();
                             int rowsMatched = 0;
+
                             for (RowData otherRow: records) {
                                 boolean matched = inputIsLeft
                                     ? condition.apply(thisRow, otherRow)
                                     : condition.apply(otherRow, thisRow);
 
                                 if (matched) {
+                                    if (inputIsLeft) {
+                                        outRow.replace(thisRow, otherRow);
+                                    } else {
+                                        outRow.replace(otherRow, thisRow);
+                                    }
+                                    collect.collect(outRow);
+                                    rowsMatched++;
+                                } else {
                                     if (inputIsLeft) {
                                         outRow.replace(thisRow, otherNullRow);
                                     } else {
@@ -375,9 +392,9 @@ public final class OuterJoinRecordStateViews {
                                             collect.collect(outRow);
                                         }
                                     }
-                                    rowsMatched++;
                                 }
                             }
+
                             if (rowsMatched == 0) {
                                 if (inputRowOnly) {
                                     if (isAntiJoin) {
@@ -561,6 +578,14 @@ public final class OuterJoinRecordStateViews {
 
                                 if (matched) {
                                     if (inputIsLeft) {
+                                        outRow.replace(thisRow, otherRow);
+                                    } else {
+                                        outRow.replace(otherRow, thisRow);
+                                    }
+                                    collect.collect(outRow);
+                                    rowsMatched++;
+                                } else {
+                                    if (inputIsLeft) {
                                         outRow.replace(thisRow, otherNullRow);
                                     } else {
                                         outRow.replace(otherNullRow, thisRow);
@@ -575,7 +600,6 @@ public final class OuterJoinRecordStateViews {
                                             collect.collect(outRow);
                                         }
                                     }
-                                    rowsMatched++;
                                 }
                             }
                             if (rowsMatched == 0) {
