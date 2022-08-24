@@ -94,6 +94,57 @@ public final class OuterJoinRecordStateViews {
         }
     }
 
+    static void processElements(Iterable<RowData> records, Collector<RowData> collect,
+            JoinCondition condition, boolean inputIsLeft, JoinedRowData outRow,
+            RowData thisRow, RowData otherNullRow, boolean isAntiJoin,
+            boolean inputRowOnly) {
+
+        int rowsMatched = 0;
+
+        for (RowData otherRow : records) {
+            boolean matched = inputIsLeft
+                    ? condition.apply(thisRow, otherRow)
+                    : condition.apply(otherRow, thisRow);
+
+            if (matched) {
+                rowsMatched++;
+                if (!isAntiJoin) {
+                    if (inputIsLeft) {
+                        outRow.replace(thisRow, otherRow);
+                    } else {
+                        outRow.replace(otherRow, thisRow);
+                    }
+                    if (inputRowOnly) {
+                        // SEMI join case, only emit this row and then stop
+                        // proccessing additional records
+                        collect.collect(thisRow);
+                        break;
+                    } else {
+                        collect.collect(outRow);
+                    }
+                }
+            }
+        }
+
+        if (rowsMatched == 0) {
+            if (inputRowOnly) {
+                if (isAntiJoin) {
+                    // Only emit if we're an AntiJoin, otherwise its a semi join,
+                    // so we do not want to emit non matching rows
+                    collect.collect(thisRow);
+                }
+            } else {
+                // used by OUTER JOIN
+                if (inputIsLeft) {
+                    outRow.replace(thisRow, otherNullRow);
+                } else {
+                    outRow.replace(otherNullRow, thisRow);
+                }
+                collect.collect(outRow);
+            }
+        }
+    }
+
     // ------------------------------------------------------------------------------------------
 
     private static final class JoinKeyContainsUniqueKey implements OuterJoinRecordStateView {
@@ -184,71 +235,22 @@ public final class OuterJoinRecordStateViews {
             outRow.setRowKind(RowKind.INSERT);
 
             be.applyToAllKeys(VoidNamespace.INSTANCE,
-                VoidNamespaceSerializer.INSTANCE,
-                recordStateDesc,
-                new KeyedStateFunction<RowData, ValueState<Tuple2<RowData, Integer> >>() {
-                    @Override
-                    public void process(RowData key, ValueState<Tuple2<RowData, Integer>> state) throws Exception {
-                        Tuple2<RowData, Integer>  record = state.value();
-                        RowData thisRow = record.f0;
+                    VoidNamespaceSerializer.INSTANCE,
+                    recordStateDesc,
+                    new KeyedStateFunction<RowData, ValueState<Tuple2<RowData, Integer>>>() {
+                        @Override
+                        public void process(RowData key, ValueState<Tuple2<RowData, Integer>> state) throws Exception {
+                            Tuple2<RowData, Integer> record = state.value();
+                            RowData thisRow = record.f0;
 
-                        // set current key context for otherView fetch
-                        be.setCurrentKey(key);
+                            // set current key context for otherView fetch
+                            be.setCurrentKey(key);
 
-                        int rowsMatched = 0;
-                        Iterable<RowData> records = otherView.getRecords();
-                        for (RowData otherRow : records) {
-                            boolean matched = inputIsLeft
-                                ? condition.apply(thisRow, otherRow)
-                                : condition.apply(otherRow, thisRow);
-
-                            if (matched) {
-                                if (inputIsLeft) {
-                                    outRow.replace(thisRow, otherRow);
-                                } else {
-                                    outRow.replace(otherRow, thisRow);
-                                }
-                                collect.collect(outRow);
-                                rowsMatched++;
-                            } else {
-                                if (inputIsLeft) {
-                                    outRow.replace(thisRow, otherNullRow);
-                                } else {
-                                    outRow.replace(otherNullRow, thisRow);
-                                }
-                                if (!isAntiJoin) {
-                                    // with AntiJoin, we do not emit any matching records
-                                    if (inputRowOnly) {
-                                        // used by the AntiSemi join operator
-                                        collect.collect(thisRow);
-                                    } else {
-                                        // used by FULL OUTER JOIN
-                                        collect.collect(outRow);
-                                    }
-                                }
-                            }
+                            Iterable<RowData> records = otherView.getRecords();
+                            processElements(records, collect, condition, inputIsLeft, outRow,
+                                    thisRow, otherNullRow, isAntiJoin, inputRowOnly);
                         }
-
-                        if (rowsMatched == 0) {
-                            if (inputRowOnly) {
-                                if (isAntiJoin) {
-                                    // Only emit if we're an AntiJoin, otherwise its a semi join,
-                                    // so we do not want to emit non matching rows
-                                    outRow.replace(thisRow, otherNullRow);
-                                    collect.collect(thisRow);
-                                }
-                            } else {
-                                // used by OUTER JOIN
-                                if (inputIsLeft) {
-                                    outRow.replace(thisRow, otherNullRow);
-                                } else {
-                                    outRow.replace(otherNullRow, thisRow);
-                                }
-                                collect.collect(outRow);
-                            }
-                        }
-                    }
-                });
+                    });
         }
 
         @Override
@@ -350,72 +352,23 @@ public final class OuterJoinRecordStateViews {
             outRow.setRowKind(RowKind.INSERT);
 
             be.applyToAllKeys(VoidNamespace.INSTANCE,
-                VoidNamespaceSerializer.INSTANCE,
-                recordStateDesc,
-                new KeyedStateFunction<RowData, MapState<RowData, Tuple2<RowData, Integer>>>() {
-                    @Override
-                    public void process(RowData key, MapState<RowData, Tuple2<RowData, Integer>> state) throws Exception {
-                        // set current key context for otherView fetch
-                        be.setCurrentKey(key);
+                    VoidNamespaceSerializer.INSTANCE,
+                    recordStateDesc,
+                    new KeyedStateFunction<RowData, MapState<RowData, Tuple2<RowData, Integer>>>() {
+                        @Override
+                        public void process(RowData key, MapState<RowData, Tuple2<RowData, Integer>> state)
+                                throws Exception {
+                            // set current key context for otherView fetch
+                            be.setCurrentKey(key);
 
-                        for (Map.Entry<RowData, Tuple2<RowData, Integer>> entry : state.entries()) {
-                            RowData thisRow = entry.getValue().f0;
-                            Iterable<RowData> records = otherView.getRecords();
-                            int rowsMatched = 0;
-
-                            for (RowData otherRow: records) {
-                                boolean matched = inputIsLeft
-                                    ? condition.apply(thisRow, otherRow)
-                                    : condition.apply(otherRow, thisRow);
-
-                                if (matched) {
-                                    if (inputIsLeft) {
-                                        outRow.replace(thisRow, otherRow);
-                                    } else {
-                                        outRow.replace(otherRow, thisRow);
-                                    }
-                                    collect.collect(outRow);
-                                    rowsMatched++;
-                                } else {
-                                    if (inputIsLeft) {
-                                        outRow.replace(thisRow, otherNullRow);
-                                    } else {
-                                        outRow.replace(otherNullRow, thisRow);
-                                    }
-                                    if (!isAntiJoin) {
-                                        // with AntiJoin, we do not emit any matching records
-                                        if (inputRowOnly) {
-                                            // used by the AntiSemi join operator
-                                            collect.collect(thisRow);
-                                        } else {
-                                            // used by FULL OUTER JOIN
-                                            collect.collect(outRow);
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (rowsMatched == 0) {
-                                if (inputRowOnly) {
-                                    if (isAntiJoin) {
-                                        // Only emit if we're an AntiJoin, otherwise its a semi join,
-                                        // so we do not want to emit non matching rows
-                                        outRow.replace(thisRow, otherNullRow);
-                                        collect.collect(thisRow);
-                                    }
-                                } else {
-                                    // used by OUTER JOIN
-                                    if (inputIsLeft) {
-                                        outRow.replace(thisRow, otherNullRow);
-                                    } else {
-                                        outRow.replace(otherNullRow, thisRow);
-                                    }
-                                    collect.collect(outRow);
-                                }
+                            for (Map.Entry<RowData, Tuple2<RowData, Integer>> entry : state.entries()) {
+                                RowData thisRow = entry.getValue().f0;
+                                Iterable<RowData> records = otherView.getRecords();
+                                processElements(records, collect, condition, inputIsLeft, outRow,
+                                        thisRow, otherNullRow, isAntiJoin, inputRowOnly);
                             }
                         }
-                    }
-                });
+                    });
         }
 
         @Override
@@ -547,7 +500,6 @@ public final class OuterJoinRecordStateViews {
             };
         }
 
-
         private void emitState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
                 JoinRecordStateView otherView, JoinCondition condition, boolean isAntiJoin,
                 boolean inputRowOnly, boolean inputIsLeft) throws Exception {
@@ -559,70 +511,24 @@ public final class OuterJoinRecordStateViews {
             outRow.setRowKind(RowKind.INSERT);
 
             be.applyToAllKeys(VoidNamespace.INSTANCE,
-                VoidNamespaceSerializer.INSTANCE,
-                recordStateDesc,
-                new KeyedStateFunction<RowData, MapState<RowData, Tuple2<Integer, Integer>>>() {
-                    @Override
-                    public void process(RowData key, MapState<RowData, Tuple2<Integer, Integer>> state) throws Exception {
-                        // set current key context for otherView fetch
-                        be.setCurrentKey(key);
+                    VoidNamespaceSerializer.INSTANCE,
+                    recordStateDesc,
+                    new KeyedStateFunction<RowData, MapState<RowData, Tuple2<Integer, Integer>>>() {
+                        @Override
+                        public void process(RowData key, MapState<RowData, Tuple2<Integer, Integer>> state)
+                                throws Exception {
+                            // set current key context for otherView fetch
+                            be.setCurrentKey(key);
 
-                        for (Map.Entry<RowData, Tuple2<Integer, Integer>> entry : state.entries()) {
-                            RowData thisRow = entry.getKey();
-                            Iterable<RowData> records = otherView.getRecords();
-                            int rowsMatched = 0;
-                            for (RowData otherRow: records) {
-                                boolean matched = inputIsLeft
-                                    ? condition.apply(thisRow, otherRow)
-                                    : condition.apply(otherRow, thisRow);
-
-                                if (matched) {
-                                    if (inputIsLeft) {
-                                        outRow.replace(thisRow, otherRow);
-                                    } else {
-                                        outRow.replace(otherRow, thisRow);
-                                    }
-                                    collect.collect(outRow);
-                                    rowsMatched++;
-                                } else {
-                                    if (inputIsLeft) {
-                                        outRow.replace(thisRow, otherNullRow);
-                                    } else {
-                                        outRow.replace(otherNullRow, thisRow);
-                                    }
-                                    if (!isAntiJoin) {
-                                        // with AntiJoin, we do not emit any matching records
-                                        if (inputRowOnly) {
-                                            // used by the AntiSemi join operator
-                                            collect.collect(thisRow);
-                                        } else {
-                                            // used by FULL OUTER JOIN
-                                            collect.collect(outRow);
-                                        }
-                                    }
-                                }
-                            }
-                            if (rowsMatched == 0) {
-                                if (inputRowOnly) {
-                                    if (isAntiJoin) {
-                                        // Only emit if we're an AntiJoin, otherwise its a semi join,
-                                        // so we do not want to emit non matching rows
-                                        outRow.replace(thisRow, otherNullRow);
-                                        collect.collect(thisRow);
-                                    }
-                                } else {
-                                    // used by OUTER JOIN
-                                    if (inputIsLeft) {
-                                        outRow.replace(thisRow, otherNullRow);
-                                    } else {
-                                        outRow.replace(otherNullRow, thisRow);
-                                    }
-                                    collect.collect(outRow);
-                                }
+                            for (Map.Entry<RowData, Tuple2<Integer, Integer>> entry : state.entries()) {
+                                RowData thisRow = entry.getKey();
+                                Iterable<RowData> records = otherView.getRecords();
+                                processElements(records, collect, condition, inputIsLeft, outRow,
+                                        thisRow, otherNullRow, isAntiJoin, inputRowOnly);
                             }
                         }
-                    }
-                });
+                    });
+
         }
 
         @Override
