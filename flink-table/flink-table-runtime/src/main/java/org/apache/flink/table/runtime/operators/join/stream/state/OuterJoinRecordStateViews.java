@@ -94,14 +94,31 @@ public final class OuterJoinRecordStateViews {
         }
     }
 
-    static void processElements(Iterable<RowData> records, Collector<RowData> collect,
+    static void processElements(JoinRecordStateView otherView, Collector<RowData> collect,
             JoinCondition condition, boolean inputIsLeft, JoinedRowData outRow,
             RowData thisRow, RowData otherNullRow, boolean isAntiJoin,
-            boolean inputRowOnly) {
+            boolean inputRowOnly) throws Exception {
 
         int rowsMatched = 0;
 
-        for (RowData otherRow : records) {
+        Iterator<?> recordIter;
+        if (otherView instanceof OuterJoinRecordStateView) {
+            OuterJoinRecordStateView ov = (OuterJoinRecordStateView) otherView;
+            Iterable<Tuple2<RowData, Integer>> oi = ov.getRecordsAndNumOfAssociations();
+            recordIter = oi.iterator();
+        } else {
+            recordIter = otherView.getRecords().iterator();
+        }
+
+        while (recordIter.hasNext()) {
+            RowData otherRow;
+            if (otherView instanceof OuterJoinRecordStateView) {
+                Tuple2<RowData, Integer> record = (Tuple2<RowData, Integer>) recordIter.next();
+                otherRow = record.f0;
+            } else {
+                otherRow = (RowData) recordIter.next();
+            }
+
             boolean matched = inputIsLeft
                     ? condition.apply(thisRow, otherRow)
                     : condition.apply(otherRow, thisRow);
@@ -246,8 +263,7 @@ public final class OuterJoinRecordStateViews {
                             // set current key context for otherView fetch
                             be.setCurrentKey(key);
 
-                            Iterable<RowData> records = otherView.getRecords();
-                            processElements(records, collect, condition, inputIsLeft, outRow,
+                            processElements(otherView, collect, condition, inputIsLeft, outRow,
                                     thisRow, otherNullRow, isAntiJoin, inputRowOnly);
                         }
                     });
@@ -363,8 +379,7 @@ public final class OuterJoinRecordStateViews {
 
                             for (Map.Entry<RowData, Tuple2<RowData, Integer>> entry : state.entries()) {
                                 RowData thisRow = entry.getValue().f0;
-                                Iterable<RowData> records = otherView.getRecords();
-                                processElements(records, collect, condition, inputIsLeft, outRow,
+                                processElements(otherView, collect, condition, inputIsLeft, outRow,
                                         thisRow, otherNullRow, isAntiJoin, inputRowOnly);
                             }
                         }
@@ -522,8 +537,7 @@ public final class OuterJoinRecordStateViews {
 
                             for (Map.Entry<RowData, Tuple2<Integer, Integer>> entry : state.entries()) {
                                 RowData thisRow = entry.getKey();
-                                Iterable<RowData> records = otherView.getRecords();
-                                processElements(records, collect, condition, inputIsLeft, outRow,
+                                processElements(otherView, collect, condition, inputIsLeft, outRow,
                                         thisRow, otherNullRow, isAntiJoin, inputRowOnly);
                             }
                         }
