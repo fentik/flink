@@ -51,26 +51,23 @@ import static org.junit.Assert.assertEquals;
 public class DedupSinkUpsertMaterializerTest {
 
     private final StateTtlConfig ttlConfig = StateConfigUtil.createTtlConfig(1000);
-    private final LogicalType[] types = new LogicalType[] {new IntType(), new VarCharType()};
+    private final LogicalType[] types = new LogicalType[] { new IntType(), new VarCharType() };
     private final InternalTypeInfo<RowData> recordType = InternalTypeInfo.ofFields(types);
-    private final RowDataKeySelector keySelector =
-            HandwrittenSelectorUtil.getRowDataSelector(new int[0], types);
-    private final GeneratedRecordEqualiser equaliser =
-            new GeneratedRecordEqualiser("", "", new Object[0]) {
+    private final RowDataKeySelector keySelector = HandwrittenSelectorUtil.getRowDataSelector(new int[0], types);
+    private final GeneratedRecordEqualiser equaliser = new GeneratedRecordEqualiser("", "", new Object[0]) {
 
-                @Override
-                public RecordEqualiser newInstance(ClassLoader classLoader) {
-                    return new TestRecordEqualiser();
-                }
-            };
+        @Override
+        public RecordEqualiser newInstance(ClassLoader classLoader) {
+            return new TestRecordEqualiser();
+        }
+    };
 
     @Test
     public void test() throws Exception {
-        DedupSinkUpsertMaterializer materializer =
-                new DedupSinkUpsertMaterializer(ttlConfig, recordType, equaliser);
-        KeyedOneInputStreamOperatorTestHarness<RowData, RowData, RowData> testHarness =
-                new KeyedOneInputStreamOperatorTestHarness<>(
-                        materializer, keySelector, keySelector.getProducedType());
+        DedupSinkUpsertMaterializer materializer = new DedupSinkUpsertMaterializer(ttlConfig, recordType, equaliser,
+                false);
+        KeyedOneInputStreamOperatorTestHarness<RowData, RowData, RowData> testHarness = new KeyedOneInputStreamOperatorTestHarness<>(
+                materializer, keySelector, keySelector.getProducedType());
 
         testHarness.open();
 
@@ -90,7 +87,6 @@ public class DedupSinkUpsertMaterializerTest {
 
         testHarness.processElement(insertRecord(1, "a3"));
         shouldEmitNothing(testHarness);
-
 
         testHarness.processElement(deleteRecord(1, "a2"));
         shouldEmitNothing(testHarness);
