@@ -368,6 +368,14 @@ public class ExecutionConfigOptions {
             .defaultValue(false)
             .withDescription("Use hybrid batch stream mode for backfill");
 
+    
+    @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
+    public static final ConfigOption<Boolean> TABLE_EXEC_DEDUP_SINK_MATERIALIZER = key(
+            "table.exec.dedup-sink-materializer")
+            .booleanType()
+            .defaultValue(true)
+            .withDescription("Use DedupSinkUpsertMaterializer variant");
+
     // ------------------------------------------------------------------------
     // Other Exec Options
     // ------------------------------------------------------------------------

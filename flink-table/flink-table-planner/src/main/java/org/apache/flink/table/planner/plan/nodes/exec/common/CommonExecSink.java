@@ -66,6 +66,7 @@ import org.apache.flink.table.runtime.keyselector.RowDataKeySelector;
 import org.apache.flink.table.runtime.operators.sink.ConstraintEnforcer;
 import org.apache.flink.table.runtime.operators.sink.SinkOperator;
 import org.apache.flink.table.runtime.operators.sink.SinkUpsertMaterializer;
+import org.apache.flink.table.runtime.operators.sink.DedupSinkUpsertMaterializer;
 import org.apache.flink.table.runtime.operators.sink.StreamRecordTimestampInserter;
 import org.apache.flink.table.runtime.typeutils.InternalSerializers;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
@@ -183,9 +184,15 @@ public abstract class CommonExecSink extends ExecNodeBase<Object>
         }
 
         if (needMaterialization) {
-            sinkTransform =
-                    applyUpsertMaterialize(
-                            sinkTransform, primaryKeys, sinkParallelism, config, physicalRowType);
+            if (config.get(ExecutionConfigOptions.TABLE_EXEC_DEDUP_SINK_MATERIALIZER)) {
+                sinkTransform =
+                        applyDedupUpsertMaterialize(
+                                sinkTransform, primaryKeys, sinkParallelism, config, physicalRowType);
+            } else {
+                sinkTransform =
+                applyUpsertMaterialize(
+                        sinkTransform, primaryKeys, sinkParallelism, config, physicalRowType);
+            }
         }
 
         return (Transformation<Object>)
@@ -418,6 +425,50 @@ public abstract class CommonExecSink extends ExecNodeBase<Object>
                                         "SinkMaterializer(pk=[%s])",
                                         String.join(", ", pkFieldNames)),
                                 "SinkMaterializer",
+                                config),
+                        operator,
+                        inputTransform.getOutputType(),
+                        sinkParallelism);
+        RowDataKeySelector keySelector =
+                KeySelectorUtil.getRowDataSelector(
+                        primaryKeys, InternalTypeInfo.of(physicalRowType));
+        materializeTransform.setStateKeySelector(keySelector);
+        materializeTransform.setStateKeyType(keySelector.getProducedType());
+        return materializeTransform;
+    }
+
+    private Transformation<RowData> applyDedupUpsertMaterialize(
+        Transformation<RowData> inputTransform,
+        int[] primaryKeys,
+        int sinkParallelism,
+        ReadableConfig config,
+        RowType physicalRowType) {
+        GeneratedRecordEqualiser equaliser =
+                new EqualiserCodeGenerator(physicalRowType)
+                        .generateRecordEqualiser("DedupSinkMaterializeEqualiser");
+        DedupSinkUpsertMaterializer operator =
+                new DedupSinkUpsertMaterializer(
+                        StateConfigUtil.createTtlConfig(
+                                config.get(ExecutionConfigOptions.IDLE_STATE_RETENTION).toMillis()),
+                        InternalTypeInfo.of(physicalRowType),
+                        equaliser,
+                        config.get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL)
+                        );
+        final String[] fieldNames = physicalRowType.getFieldNames().toArray(new String[0]);
+        final List<String> pkFieldNames =
+                Arrays.stream(primaryKeys)
+                        .mapToObj(idx -> fieldNames[idx])
+                        .collect(Collectors.toList());
+
+        OneInputTransformation<RowData, RowData> materializeTransform =
+                ExecNodeUtil.createOneInputTransformation(
+                        inputTransform,
+                        createTransformationMeta(
+                                UPSERT_MATERIALIZE_TRANSFORMATION,
+                                String.format(
+                                        "DedupSinkMaterializer(pk=[%s])",
+                                        String.join(", ", pkFieldNames)),
+                                "DedupSinkMaterializer",
                                 config),
                         operator,
                         inputTransform.getOutputType(),
