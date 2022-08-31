@@ -125,10 +125,45 @@ public final class JoinRecordStateViews {
 
         public void addRecordToBatch(RowData record) throws Exception {
             LOG.info("MINIBATCH {} addRecordToBatch", this.getClass().getSimpleName());
+            RowData prevRow = bufferState.value();
+            if (prevRow == null) {
+                // new state for key, could be acc or retract
+                bufferState.update(record);
+            } else {
+                if (RowDataUtil.isAccumulateMsg(prevRow)) {
+                    if (RowDataUtil.isAccumulateMsg(record)) {
+                        LOG.warn("MINIBATCH {} two sequential inserts!", this.getClass().getSimpleName());
+                    } else {
+                        // existing message is +I/+U and incoming is -D/-U: clear state
+                        bufferState.clear();
+                    }
+                } else {
+                    if (RowDataUtil.isAccumulateMsg(record)) {
+                        // existing message is -D/-U and incoming is +I/+U: update w/ current record
+                        bufferState.update(record);
+                    } else {
+                        LOG.warn("MINIBATCH {} two sequential retractions!", this.getClass().getSimpleName());
+                    }
+                }
+            }
         }
 
-        public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor process) throws Exception {
+        public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor processor) throws Exception {
             LOG.info("MINIBATCH {} getCurrentBatch()", this.getClass().getSimpleName());
+            ValueStateDescriptor<RowData> bufferStateDesc = new ValueStateDescriptor<>(stateName + "-buffer", recordType);
+            be.applyToAllKeys(VoidNamespace.INSTANCE,
+                VoidNamespaceSerializer.INSTANCE,
+                bufferStateDesc,
+                new KeyedStateFunction<RowData, ValueState<RowData>>() {
+                    @Override
+                    public void process(RowData key, ValueState<RowData> state) throws Exception {
+                        RowData record = state.value();
+                        // set current key context for otherView fetch
+                        be.setCurrentKey(key);
+                        processor.process(record);
+                        bufferState.clear();
+                    }
+                });
         }
 
         @Override
@@ -253,7 +288,23 @@ public final class JoinRecordStateViews {
         }
 
         @Override
-        public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor process) throws Exception {
+        public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor processor) throws Exception {
+            MapStateDescriptor<RowData, RowData> bufferStateDesc = new MapStateDescriptor<>(stateName + "-buffer", uniqueKeyType,
+                    recordType);
+            be.applyToAllKeys(VoidNamespace.INSTANCE,
+                VoidNamespaceSerializer.INSTANCE,
+                bufferStateDesc,
+                new KeyedStateFunction<RowData, MapState<RowData, RowData>>() {
+                   @Override
+                   public void process(RowData key, MapState<RowData, RowData> state) throws Exception {
+                        be.setCurrentKey(key); 
+                        for (RowData record : state.values()) {
+                            processor.process(record);
+                        }
+                        bufferState.clear();
+                   }
+                }
+            );
         }
 
         @Override
@@ -346,7 +397,7 @@ public final class JoinRecordStateViews {
         }
 
         @Override
-        public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor processRecord) throws Exception {
+        public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor processor) throws Exception {
             MapStateDescriptor<RowData, Integer> bufferStateDesc = new MapStateDescriptor<>(stateName + "-buffer", recordType,
                     Types.INT);
 
@@ -356,20 +407,20 @@ public final class JoinRecordStateViews {
                 new KeyedStateFunction<RowData, MapState<RowData, Integer>>() {
                     @Override
                     public void process(RowData key, MapState<RowData, Integer> state) throws Exception {
-                        // set current key context for otherView fetch
                         be.setCurrentKey(key);
 
                         for (Map.Entry<RowData, Integer> entry : state.entries()) {
                             RowData record = entry.getKey();
                             Integer count = entry.getValue();
-                            if (count < 0) {
-                                // records are retractions
-                                record.setRowKind(RowKind.DELETE);
-                            } else {
-                                record.setRowKind(RowKind.INSERT);
+                            RowKind kind = count < 0 ? RowKind.DELETE : RowKind.INSERT;
+                            while (count > 0) {
+                                // processor may overwrite kind, so reset it after every call
+                                record.setRowKind(kind);
+                                processor.process(record);
+                                count--;
                             }
-                            processRecord(record);
                         }
+                        bufferState.clear();
                     }
                 });
         }
