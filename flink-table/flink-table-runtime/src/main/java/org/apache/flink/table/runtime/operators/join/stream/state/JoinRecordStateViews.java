@@ -101,7 +101,8 @@ public final class JoinRecordStateViews {
                 InternalTypeInfo<RowData> recordType,
                 StateTtlConfig ttlConfig) {
             ValueStateDescriptor<RowData> recordStateDesc = new ValueStateDescriptor<>(stateName, recordType);
-            ValueStateDescriptor<RowData> bufferStateDesc = new ValueStateDescriptor<>(stateName + "-buffer", recordType);
+            ValueStateDescriptor<RowData> bufferStateDesc = new ValueStateDescriptor<>(stateName + "-buffer",
+                    recordType);
             if (ttlConfig.isEnabled()) {
                 recordStateDesc.enableTimeToLive(ttlConfig);
             }
@@ -138,8 +139,8 @@ public final class JoinRecordStateViews {
                     }
                 } else {
                     if (RowDataUtil.isAccumulateMsg(record)) {
-                        // existing message is -D/-U and incoming is +I/+U: update w/ current record
-                        bufferState.update(record);
+                        // existing message is -D/-U and incoming is +I/+U: clear
+                        bufferState.clear();
                     } else {
                         LOG.warn("MINIBATCH {} two sequential retractions!", this.getClass().getSimpleName());
                     }
@@ -148,20 +149,21 @@ public final class JoinRecordStateViews {
         }
 
         public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor processor) throws Exception {
-            ValueStateDescriptor<RowData> bufferStateDesc = new ValueStateDescriptor<>(stateName + "-buffer", recordType);
+            ValueStateDescriptor<RowData> bufferStateDesc = new ValueStateDescriptor<>(stateName + "-buffer",
+                    recordType);
             be.applyToAllKeys(VoidNamespace.INSTANCE,
-                VoidNamespaceSerializer.INSTANCE,
-                bufferStateDesc,
-                new KeyedStateFunction<RowData, ValueState<RowData>>() {
-                    @Override
-                    public void process(RowData key, ValueState<RowData> state) throws Exception {
-                        RowData record = state.value();
-                        // set current key context for otherView fetch
-                        be.setCurrentKey(key);
-                        processor.process(record);
-                        bufferState.clear();
-                    }
-                });
+                    VoidNamespaceSerializer.INSTANCE,
+                    bufferStateDesc,
+                    new KeyedStateFunction<RowData, ValueState<RowData>>() {
+                        @Override
+                        public void process(RowData key, ValueState<RowData> state) throws Exception {
+                            RowData record = state.value();
+                            // set current key context for otherView fetch
+                            be.setCurrentKey(key);
+                            processor.process(record);
+                            bufferState.clear();
+                        }
+                    });
         }
 
         @Override
@@ -182,33 +184,33 @@ public final class JoinRecordStateViews {
         }
 
         private void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-        JoinRecordStateView otherView, JoinCondition condition) throws Exception {
+                JoinRecordStateView otherView, JoinCondition condition) throws Exception {
             ValueStateDescriptor<RowData> recordStateDesc = new ValueStateDescriptor<>(stateName, recordType);
 
             JoinedRowData outRow = new JoinedRowData();
             outRow.setRowKind(RowKind.INSERT);
 
             be.applyToAllKeys(VoidNamespace.INSTANCE,
-                VoidNamespaceSerializer.INSTANCE,
-                recordStateDesc,
-                new KeyedStateFunction<RowData, ValueState<RowData>>() {
-                    @Override
-                    public void process(RowData key, ValueState<RowData> state) throws Exception {
-                        RowData thisRow = state.value();
+                    VoidNamespaceSerializer.INSTANCE,
+                    recordStateDesc,
+                    new KeyedStateFunction<RowData, ValueState<RowData>>() {
+                        @Override
+                        public void process(RowData key, ValueState<RowData> state) throws Exception {
+                            RowData thisRow = state.value();
 
-                        // set current key context for otherView fetch
-                        be.setCurrentKey(key);
+                            // set current key context for otherView fetch
+                            be.setCurrentKey(key);
 
-                        Iterable<RowData> records = otherView.getRecords();
-                        for (RowData otherRow : records) {
-                            boolean matched = condition.apply(thisRow, otherRow);
-                            outRow.replace(thisRow, otherRow);
-                            if (matched) {
-                                collect.collect(outRow);
+                            Iterable<RowData> records = otherView.getRecords();
+                            for (RowData otherRow : records) {
+                                boolean matched = condition.apply(thisRow, otherRow);
+                                outRow.replace(thisRow, otherRow);
+                                if (matched) {
+                                    collect.collect(outRow);
+                                }
                             }
                         }
-                    }
-                });
+                    });
         }
     }
 
@@ -226,7 +228,7 @@ public final class JoinRecordStateViews {
         private final InternalTypeInfo<RowData> recordType;
 
         private InputSideHasUniqueKey(
-            RuntimeContext ctx,
+                RuntimeContext ctx,
                 String stateName,
                 InternalTypeInfo<RowData> recordType,
                 InternalTypeInfo<RowData> uniqueKeyType,
@@ -236,7 +238,8 @@ public final class JoinRecordStateViews {
             checkNotNull(uniqueKeySelector);
             MapStateDescriptor<RowData, RowData> recordStateDesc = new MapStateDescriptor<>(stateName, uniqueKeyType,
                     recordType);
-            MapStateDescriptor<RowData, RowData> bufferStateDesc = new MapStateDescriptor<>(stateName + "-buffer", uniqueKeyType,
+            MapStateDescriptor<RowData, RowData> bufferStateDesc = new MapStateDescriptor<>(stateName + "-buffer",
+                    uniqueKeyType,
                     recordType);
 
             if (ttlConfig.isEnabled()) {
@@ -275,7 +278,7 @@ public final class JoinRecordStateViews {
                     } else {
                         bufferState.remove(uniqueKey);
                     }
-                }  else {
+                } else {
                     if (RowDataUtil.isAccumulateMsg(prevRow)) {
                         bufferState.put(uniqueKey, record);
                     } else {
@@ -287,22 +290,22 @@ public final class JoinRecordStateViews {
 
         @Override
         public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor processor) throws Exception {
-            MapStateDescriptor<RowData, RowData> bufferStateDesc = new MapStateDescriptor<>(stateName + "-buffer", uniqueKeyType,
+            MapStateDescriptor<RowData, RowData> bufferStateDesc = new MapStateDescriptor<>(stateName + "-buffer",
+                    uniqueKeyType,
                     recordType);
             be.applyToAllKeys(VoidNamespace.INSTANCE,
-                VoidNamespaceSerializer.INSTANCE,
-                bufferStateDesc,
-                new KeyedStateFunction<RowData, MapState<RowData, RowData>>() {
-                   @Override
-                   public void process(RowData key, MapState<RowData, RowData> state) throws Exception {
-                        be.setCurrentKey(key); 
-                        for (RowData record : state.values()) {
-                            processor.process(record);
+                    VoidNamespaceSerializer.INSTANCE,
+                    bufferStateDesc,
+                    new KeyedStateFunction<RowData, MapState<RowData, RowData>>() {
+                        @Override
+                        public void process(RowData key, MapState<RowData, RowData> state) throws Exception {
+                            be.setCurrentKey(key);
+                            for (RowData record : state.values()) {
+                                processor.process(record);
+                            }
+                            bufferState.clear();
                         }
-                        bufferState.clear();
-                   }
-                }
-            );
+                    });
         }
 
         @Override
@@ -326,27 +329,27 @@ public final class JoinRecordStateViews {
             outRow.setRowKind(RowKind.INSERT);
 
             be.applyToAllKeys(VoidNamespace.INSTANCE,
-                VoidNamespaceSerializer.INSTANCE,
-                recordStateDesc,
-                new KeyedStateFunction<RowData, MapState<RowData, RowData>>() {
-                    @Override
-                    public void process(RowData key, MapState<RowData, RowData> state) throws Exception {
-                        // set current key context for otherView fetch
-                        be.setCurrentKey(key);
+                    VoidNamespaceSerializer.INSTANCE,
+                    recordStateDesc,
+                    new KeyedStateFunction<RowData, MapState<RowData, RowData>>() {
+                        @Override
+                        public void process(RowData key, MapState<RowData, RowData> state) throws Exception {
+                            // set current key context for otherView fetch
+                            be.setCurrentKey(key);
 
-                        for (Map.Entry<RowData, RowData> entry : state.entries()) {
-                            RowData thisRow = entry.getValue();
-                            Iterable<RowData> records = otherView.getRecords();
-                            for (RowData otherRow : records) {
-                                boolean matched = condition.apply(thisRow, otherRow);
-                                outRow.replace(thisRow, otherRow);
-                                if (matched) {
-                                    collect.collect(outRow);
+                            for (Map.Entry<RowData, RowData> entry : state.entries()) {
+                                RowData thisRow = entry.getValue();
+                                Iterable<RowData> records = otherView.getRecords();
+                                for (RowData otherRow : records) {
+                                    boolean matched = condition.apply(thisRow, otherRow);
+                                    outRow.replace(thisRow, otherRow);
+                                    if (matched) {
+                                        collect.collect(outRow);
+                                    }
                                 }
                             }
                         }
-                    }
-                });
+                    });
         }
     }
 
@@ -354,7 +357,8 @@ public final class JoinRecordStateViews {
 
         private final MapState<RowData, Integer> recordState;
 
-        /* On +I/+U increment
+        /*
+         * On +I/+U increment
          * On -D/-U decrement
          * Then emit count retracts if negative or accumulate if positive
          */
@@ -370,7 +374,8 @@ public final class JoinRecordStateViews {
                 StateTtlConfig ttlConfig) {
             MapStateDescriptor<RowData, Integer> recordStateDesc = new MapStateDescriptor<>(stateName, recordType,
                     Types.INT);
-            MapStateDescriptor<RowData, Integer> bufferStateDesc = new MapStateDescriptor<>(stateName + "-buffer", recordType,
+            MapStateDescriptor<RowData, Integer> bufferStateDesc = new MapStateDescriptor<>(stateName + "-buffer",
+                    recordType,
                     Types.INT);
             if (ttlConfig.isEnabled()) {
                 recordStateDesc.enableTimeToLive(ttlConfig);
@@ -383,47 +388,56 @@ public final class JoinRecordStateViews {
 
         @Override
         public void addRecordToBatch(RowData record) throws Exception {
+            int delta = RowDataUtil.isAccumulateMsg(record) ? 1 : -1;
             RowKind origKind = record.getRowKind();
             record.setRowKind(RowKind.INSERT);
             Integer cnt = bufferState.get(record);
-            record.setRowKind(origKind);
+            LOG.info("MINIBATCH fetched count from state {}", cnt);
 
-            int delta = RowDataUtil.isAccumulateMsg(record) ? 1 : -1;
             if (cnt != null) {
                 cnt += delta;
             } else {
                 cnt = delta;
             }
-            bufferState.put(record, cnt);
+            LOG.info("MINIBATCH no unique: cnt {} origkind {}", cnt, origKind);
+            if (cnt == 0) {
+                bufferState.clear();
+            } else {
+                bufferState.put(record, cnt);
+            }
         }
 
         @Override
         public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor processor) throws Exception {
-            MapStateDescriptor<RowData, Integer> bufferStateDesc = new MapStateDescriptor<>(stateName + "-buffer", recordType,
+            MapStateDescriptor<RowData, Integer> bufferStateDesc = new MapStateDescriptor<>(stateName + "-buffer",
+                    recordType,
                     Types.INT);
 
-            be.applyToAllKeys(VoidNamespace.INSTANCE,
-                VoidNamespaceSerializer.INSTANCE,
-                bufferStateDesc,
-                new KeyedStateFunction<RowData, MapState<RowData, Integer>>() {
-                    @Override
-                    public void process(RowData key, MapState<RowData, Integer> state) throws Exception {
-                        be.setCurrentKey(key);
+            LOG.info("MINIBATCH emit for {}", stateName);
 
-                        for (Map.Entry<RowData, Integer> entry : state.entries()) {
-                            RowData record = entry.getKey();
-                            Integer count = entry.getValue();
-                            RowKind kind = count < 0 ? RowKind.DELETE : RowKind.INSERT;
-                            while (count > 0) {
-                                // processor may overwrite kind, so reset it after every call
-                                record.setRowKind(kind);
-                                processor.process(record);
-                                count--;
+            be.applyToAllKeys(VoidNamespace.INSTANCE,
+                    VoidNamespaceSerializer.INSTANCE,
+                    bufferStateDesc,
+                    new KeyedStateFunction<RowData, MapState<RowData, Integer>>() {
+                        @Override
+                        public void process(RowData key, MapState<RowData, Integer> state) throws Exception {
+                            be.setCurrentKey(key);
+
+                            for (Map.Entry<RowData, Integer> entry : state.entries()) {
+                                RowData record = entry.getKey();
+                                Integer count = entry.getValue();
+                                RowKind kind = count < 0 ? RowKind.DELETE : RowKind.INSERT;
+                                while (count > 0) {
+                                    // processor may overwrite kind, so reset it after every call
+                                    LOG.info("MINIBATCH emit record {} kind {}", record, kind);
+                                    record.setRowKind(kind);
+                                    processor.process(record);
+                                    count--;
+                                }
                             }
+                            bufferState.clear();
                         }
-                        bufferState.clear();
-                    }
-                });
+                    });
         }
 
         @Override
@@ -500,31 +514,31 @@ public final class JoinRecordStateViews {
             outRow.setRowKind(RowKind.INSERT);
 
             be.applyToAllKeys(VoidNamespace.INSTANCE,
-                VoidNamespaceSerializer.INSTANCE,
-                recordStateDesc,
-                new KeyedStateFunction<RowData, MapState<RowData, Integer>>() {
-                    @Override
-                    public void process(RowData key, MapState<RowData, Integer> state) throws Exception {
-                        // set current key context for otherView fetch
-                        be.setCurrentKey(key);
+                    VoidNamespaceSerializer.INSTANCE,
+                    recordStateDesc,
+                    new KeyedStateFunction<RowData, MapState<RowData, Integer>>() {
+                        @Override
+                        public void process(RowData key, MapState<RowData, Integer> state) throws Exception {
+                            // set current key context for otherView fetch
+                            be.setCurrentKey(key);
 
-                        for (Map.Entry<RowData, Integer> entry : state.entries()) {
-                            RowData thisRow = entry.getKey();
-                            Integer numRows = entry.getValue();
+                            for (Map.Entry<RowData, Integer> entry : state.entries()) {
+                                RowData thisRow = entry.getKey();
+                                Integer numRows = entry.getValue();
 
-                            Iterable<RowData> records = otherView.getRecords();
-                            for (RowData otherRow : records) {
-                                boolean matched = condition.apply(thisRow, otherRow);
-                                outRow.replace(thisRow, otherRow);
-                                if (matched) {
-                                    for (int i = 0; i < numRows; i++) {
-                                        collect.collect(outRow);
+                                Iterable<RowData> records = otherView.getRecords();
+                                for (RowData otherRow : records) {
+                                    boolean matched = condition.apply(thisRow, otherRow);
+                                    outRow.replace(thisRow, otherRow);
+                                    if (matched) {
+                                        for (int i = 0; i < numRows; i++) {
+                                            collect.collect(outRow);
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-                });
+                    });
         }
     }
 }
