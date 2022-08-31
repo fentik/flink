@@ -73,10 +73,13 @@ class JoinConditionTypeCoerceRule extends RelOptRule(
             val refList = ref1 :: ref2 :: Nil
             val targetType = typeFactory.leastRestrictive(refList.map(ref => ref.getType))
             if (targetType == null) {
+              val left = join.getLeft
+              val right = join.getRight
               throw new TableException(
-                s"implicit type conversion between" +
-                s" ${ref1.getType} and ${ref2.getType} " +
-                s"is not supported on join's condition now")
+                s"implicit type conversion between a join condition on tables " +
+                s"${left} and ${right} " +
+                s"is not supported: " +
+                s"incompatible types ${ref1.getType} ${ref2.getType}")
             }
             newJoinFilters += builder.equals(
               rexBuilder.ensureType(targetType, ref1, true),
