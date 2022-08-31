@@ -36,6 +36,7 @@ import org.apache.flink.table.runtime.operators.join.stream.state.OuterJoinRecor
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.table.runtime.util.RowDataStringSerializer;
+import org.apache.flink.streaming.api.watermark.Watermark;
 
 /**
  * Streaming unbounded Join operator which supports INNER/LEFT/RIGHT/FULL JOIN.
@@ -146,12 +147,41 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
 
     @Override
     public void processElement1(StreamRecord<RowData> element) throws Exception {
+        RowData input = element.getValue();
+        RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(leftType);
+        leftRecordStateView.addRecordToBatch(input);
+        LOG.info("MINIBATCH element 1 (left) input {} kind {} key {}", rowStringSerializer.asString(input), input.getRowKind(), getCurrentKey());
         processElement(element.getValue(), leftRecordStateView, rightRecordStateView, true);
     }
 
     @Override
     public void processElement2(StreamRecord<RowData> element) throws Exception {
+        RowData input = element.getValue();
+        RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(rightType);
+        rightRecordStateView.addRecordToBatch(input);
+        LOG.info("MINIBATCH element 2 (right) input {} kind {} key {}", rowStringSerializer.asString(input), input.getRowKind(), getCurrentKey());
         processElement(element.getValue(), rightRecordStateView, leftRecordStateView, false);
+    }
+
+    @Override
+    public void processWatermark(Watermark mark) throws Exception {
+        if (!isBatchMode()) {
+            LOG.info("MINIBATCH WATERMARK in streaming mode {}", mark);
+            rightRecordStateView.processBatch(getKeyedStateBackend(), record -> {
+                processElement(record, rightRecordStateView, leftRecordStateView, false);
+            });
+            leftRecordStateView.processBatch(getKeyedStateBackend(), record -> {
+                processElement(record, leftRecordStateView, rightRecordStateView, true);
+            });
+        }
+        super.processWatermark(mark);
+    }
+
+
+    @Override
+    public void prepareSnapshotPreBarrier(long checkpointId) throws Exception {
+        LOG.info("MINIBATCH prepareSnapshotPreBarrier");
+        super.prepareSnapshotPreBarrier(checkpointId);
     }
 
     @Override

@@ -37,6 +37,7 @@ import org.apache.flink.runtime.state.KeyedStateFunction;
 import org.apache.flink.table.runtime.generated.JoinCondition;
 import org.apache.flink.table.data.utils.JoinedRowData;
 import org.apache.flink.types.RowKind;
+import org.apache.flink.table.data.util.RowDataUtil;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -89,6 +90,7 @@ public final class JoinRecordStateViews {
     private static final class JoinKeyContainsUniqueKey implements JoinRecordStateView {
 
         private final ValueState<RowData> recordState;
+        private final ValueState<RowData> bufferState;
         private final List<RowData> reusedList;
         private final String stateName;
         private final InternalTypeInfo<RowData> recordType;
@@ -99,10 +101,12 @@ public final class JoinRecordStateViews {
                 InternalTypeInfo<RowData> recordType,
                 StateTtlConfig ttlConfig) {
             ValueStateDescriptor<RowData> recordStateDesc = new ValueStateDescriptor<>(stateName, recordType);
+            ValueStateDescriptor<RowData> bufferStateDesc = new ValueStateDescriptor<>(stateName + "-buffer", recordType);
             if (ttlConfig.isEnabled()) {
                 recordStateDesc.enableTimeToLive(ttlConfig);
             }
             this.recordState = ctx.getState(recordStateDesc);
+            this.bufferState = ctx.getState(bufferStateDesc);
             // the result records always not more than 1
             this.reusedList = new ArrayList<>(1);
             this.stateName = stateName;
@@ -117,6 +121,14 @@ public final class JoinRecordStateViews {
         @Override
         public void retractRecord(RowData record) throws Exception {
             recordState.clear();
+        }
+
+        public void addRecordToBatch(RowData record) throws Exception {
+            LOG.info("MINIBATCH {} addRecordToBatch", this.getClass().getSimpleName());
+        }
+
+        public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor process) throws Exception {
+            LOG.info("MINIBATCH {} getCurrentBatch()", this.getClass().getSimpleName());
         }
 
         @Override
@@ -171,13 +183,17 @@ public final class JoinRecordStateViews {
 
         // stores record in the mapping <UK, Record>
         private final MapState<RowData, RowData> recordState;
+
+        /* Last record for key */
+        private final MapState<RowData, RowData> bufferState;
+
         private final KeySelector<RowData, RowData> uniqueKeySelector;
         private final String stateName;
         private final InternalTypeInfo<RowData> uniqueKeyType;
         private final InternalTypeInfo<RowData> recordType;
 
         private InputSideHasUniqueKey(
-                RuntimeContext ctx,
+            RuntimeContext ctx,
                 String stateName,
                 InternalTypeInfo<RowData> recordType,
                 InternalTypeInfo<RowData> uniqueKeyType,
@@ -187,10 +203,14 @@ public final class JoinRecordStateViews {
             checkNotNull(uniqueKeySelector);
             MapStateDescriptor<RowData, RowData> recordStateDesc = new MapStateDescriptor<>(stateName, uniqueKeyType,
                     recordType);
+            MapStateDescriptor<RowData, RowData> bufferStateDesc = new MapStateDescriptor<>(stateName + "-buffer", uniqueKeyType,
+                    recordType);
+
             if (ttlConfig.isEnabled()) {
                 recordStateDesc.enableTimeToLive(ttlConfig);
             }
             this.recordState = ctx.getMapState(recordStateDesc);
+            this.bufferState = ctx.getMapState(bufferStateDesc);
             this.uniqueKeySelector = uniqueKeySelector;
             this.stateName = stateName;
             this.uniqueKeyType = uniqueKeyType;
@@ -207,6 +227,33 @@ public final class JoinRecordStateViews {
         public void retractRecord(RowData record) throws Exception {
             RowData uniqueKey = uniqueKeySelector.getKey(record);
             recordState.remove(uniqueKey);
+        }
+
+        @Override
+        public void addRecordToBatch(RowData record) throws Exception {
+            RowData uniqueKey = uniqueKeySelector.getKey(record);
+            RowData prevRow = bufferState.get(uniqueKey);
+            if (prevRow == null) {
+                bufferState.put(uniqueKey, record);
+            } else {
+                if (RowDataUtil.isAccumulateMsg(record)) {
+                    if (RowDataUtil.isAccumulateMsg(prevRow)) {
+                        LOG.warn("MINIBATCH invalid buffer state -- two sequential row additions!");
+                    } else {
+                        bufferState.remove(uniqueKey);
+                    }
+                }  else {
+                    if (RowDataUtil.isAccumulateMsg(prevRow)) {
+                        bufferState.put(uniqueKey, record);
+                    } else {
+                        LOG.warn("MINIBATCH invalid buffer state -- two sequential row retractions!");
+                    }
+                }
+            }
+        }
+
+        @Override
+        public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor process) throws Exception {
         }
 
         @Override
@@ -257,6 +304,13 @@ public final class JoinRecordStateViews {
     private static final class InputSideHasNoUniqueKey implements JoinRecordStateView {
 
         private final MapState<RowData, Integer> recordState;
+
+        /* On +I/+U increment
+         * On -D/-U decrement
+         * Then emit count retracts if negative or accumulate if positive
+         */
+        private final MapState<RowData, Integer> bufferState;
+
         private final InternalTypeInfo<RowData> recordType;
         private final String stateName;
 
@@ -267,12 +321,33 @@ public final class JoinRecordStateViews {
                 StateTtlConfig ttlConfig) {
             MapStateDescriptor<RowData, Integer> recordStateDesc = new MapStateDescriptor<>(stateName, recordType,
                     Types.INT);
+            MapStateDescriptor<RowData, Integer> bufferStateDesc = new MapStateDescriptor<>(stateName + "-buffer", recordType,
+                    Types.INT);
             if (ttlConfig.isEnabled()) {
                 recordStateDesc.enableTimeToLive(ttlConfig);
             }
             this.stateName = stateName;
             this.recordType = recordType;
             this.recordState = ctx.getMapState(recordStateDesc);
+            this.bufferState = ctx.getMapState(bufferStateDesc);
+        }
+
+        @Override
+        public void addRecordToBatch(RowData record) throws Exception {
+            Integer cnt = recordState.get(record);
+            int delta = RowDataUtil.isAccumulateMsg(record) ? 1 : -1;
+            if (cnt != null) {
+                cnt += delta;
+            } else {
+                cnt = delta;
+            }
+            LOG.info("MINIBATCH {} addRecordToBatch cnt {}", this.getClass().getSimpleName(), cnt);
+            bufferState.put(record, cnt);
+        }
+
+        @Override
+        public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor process) throws Exception {
+            LOG.info("MINIBATCH {} getCurrentBatch()", this.getClass().getSimpleName());
         }
 
         @Override

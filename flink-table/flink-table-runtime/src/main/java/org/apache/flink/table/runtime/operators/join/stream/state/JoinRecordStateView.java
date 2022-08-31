@@ -46,6 +46,11 @@ public interface JoinRecordStateView {
     /** Retract the record from the state view. */
     void retractRecord(RowData record) throws Exception;
 
+    /** mini-batch mode processing */
+    void addRecordToBatch(RowData record) throws Exception;
+    void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor process) throws Exception;
+
+
     /** Gets all the records under the current context (i.e. join key). */
     Iterable<RowData> getRecords() throws Exception;
 
