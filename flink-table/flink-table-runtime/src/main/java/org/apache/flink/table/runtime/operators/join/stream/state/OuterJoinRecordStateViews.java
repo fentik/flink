@@ -199,13 +199,14 @@ public final class OuterJoinRecordStateViews {
         }
 
         @Override
-        public void addRecord(RowData record) throws Exception {
-            addRecord(record, -1);
+        public boolean addRecord(RowData record) throws Exception {
+            return addRecord(record, -1);
         }
 
         @Override
-        public void addRecord(RowData record, int numOfAssociations) throws Exception {
+        public boolean addRecord(RowData record, int numOfAssociations) throws Exception {
             recordState.update(Tuple2.of(record, numOfAssociations));
+            return true;
         }
 
         @Override
@@ -323,14 +324,15 @@ public final class OuterJoinRecordStateViews {
         }
 
         @Override
-        public void addRecord(RowData record) throws Exception {
-            addRecord(record, -1);
+        public boolean addRecord(RowData record) throws Exception {
+            return addRecord(record, -1);
         }
 
         @Override
-        public void addRecord(RowData record, int numOfAssociations) throws Exception {
+        public boolean addRecord(RowData record, int numOfAssociations) throws Exception {
             RowData uniqueKey = uniqueKeySelector.getKey(record);
             recordState.put(uniqueKey, Tuple2.of(record, numOfAssociations));
+            return true;
         }
 
         @Override
@@ -432,12 +434,12 @@ public final class OuterJoinRecordStateViews {
         }
 
         @Override
-        public void addRecord(RowData record) throws Exception {
-            addRecord(record, -1);
+        public boolean addRecord(RowData record) throws Exception {
+            return addRecord(record, -1);
         }
 
         @Override
-        public void addRecord(RowData record, int numOfAssociations) throws Exception {
+        public boolean addRecord(RowData record, int numOfAssociations) throws Exception {
             Tuple2<Integer, Integer> tuple = recordState.get(record);
             if (tuple != null) {
                 tuple.f0 = tuple.f0 + 1;
@@ -446,6 +448,7 @@ public final class OuterJoinRecordStateViews {
                 tuple = Tuple2.of(1, numOfAssociations);
             }
             recordState.put(record, tuple);
+            return true;
         }
 
         @Override

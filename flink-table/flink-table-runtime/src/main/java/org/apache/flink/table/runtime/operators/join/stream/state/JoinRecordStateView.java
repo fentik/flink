@@ -41,7 +41,10 @@ import org.apache.flink.table.runtime.generated.JoinCondition;
 public interface JoinRecordStateView {
 
     /** Add a new record to the state view. */
-    void addRecord(RowData record) throws Exception;
+    /* returns true if record has been added to the state, 
+     * false if it's duplicate
+     */
+    boolean addRecord(RowData record) throws Exception;
 
     /** Retract the record from the state view. */
     void retractRecord(RowData record) throws Exception;

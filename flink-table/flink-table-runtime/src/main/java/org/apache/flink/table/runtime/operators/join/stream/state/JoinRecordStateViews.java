@@ -110,8 +110,14 @@ public final class JoinRecordStateViews {
         }
 
         @Override
-        public void addRecord(RowData record) throws Exception {
-            recordState.update(record);
+        public boolean addRecord(RowData record) throws Exception {
+            RowData prevRecord = recordState.value();
+            if (prevRecord != null && prevRecord.equals(record)) {
+                return false;
+            } else {
+                recordState.update(record);
+                return true;
+             }
         }
 
         @Override
@@ -198,9 +204,15 @@ public final class JoinRecordStateViews {
         }
 
         @Override
-        public void addRecord(RowData record) throws Exception {
+        public boolean addRecord(RowData record) throws Exception {
             RowData uniqueKey = uniqueKeySelector.getKey(record);
-            recordState.put(uniqueKey, record);
+            RowData prevRecord = recordState.get(uniqueKey);
+            if (prevRecord != null && prevRecord.equals(record)) {
+                return false;
+            } else {
+                recordState.put(uniqueKey, record);
+                return true;
+            }
         }
 
         @Override
@@ -276,7 +288,7 @@ public final class JoinRecordStateViews {
         }
 
         @Override
-        public void addRecord(RowData record) throws Exception {
+        public boolean addRecord(RowData record) throws Exception {
             Integer cnt = recordState.get(record);
             if (cnt != null) {
                 cnt += 1;
@@ -284,6 +296,7 @@ public final class JoinRecordStateViews {
                 cnt = 1;
             }
             recordState.put(record, cnt);
+            return true;
         }
 
         @Override

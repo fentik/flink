@@ -43,7 +43,7 @@ public interface OuterJoinRecordStateView extends JoinRecordStateView {
      * @param record the added record
      * @param numOfAssociations the number of records associated with other side
      */
-    void addRecord(RowData record, int numOfAssociations) throws Exception;
+    boolean addRecord(RowData record, int numOfAssociations) throws Exception;
 
     /**
      * Updates the number of associations belongs to the record.

@@ -292,9 +292,11 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                 if (associatedRecords.isEmpty()) { // there is no matched rows on the other side
                     // send +I[record+null]
                     outRow.setRowKind(RowKind.INSERT);
-                    outputNullPadding(input, inputIsLeft);
                     // state.add(record, 0)
-                    inputSideOuterStateView.addRecord(input, 0);
+                    boolean added = inputSideOuterStateView.addRecord(input, 0);
+                    if (added) {
+                        outputNullPadding(input, inputIsLeft);
+                    }
                 } else { // there are matched rows on the other side
                     if (otherIsOuter) { // other side is outer
                         OuterJoinRecordStateView otherSideOuterStateView = (OuterJoinRecordStateView) otherSideStateView;
@@ -311,8 +313,11 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                                     other, outerRecord.numOfAssociations + 1);
                         }
                     }
+                    // state.add(record, other.size)
+                    boolean added = inputSideOuterStateView.addRecord(input, associatedRecords.size());
+
                     // send +I[record+other]s
-                    if (!isBatchMode()) {
+                    if (!isBatchMode() && added) {
                         // do not even retrieve records since the results are only used
                         // to emit and not mutate state, we do not want to waste cycles
                         outRow.setRowKind(RowKind.INSERT);
@@ -320,17 +325,15 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                             output(input, other, inputIsLeft);
                         }
                     }
-                    // state.add(record, other.size)
-                    inputSideOuterStateView.addRecord(input, associatedRecords.size());
                 }
             } else { // input side not outer
                 // state.add(record)
-                inputSideStateView.addRecord(input);
+                boolean added = inputSideStateView.addRecord(input);
                 if (!associatedRecords.isEmpty()) { // if there are matched rows on the other side
                     if (otherIsOuter) { // if other side is outer
                         OuterJoinRecordStateView otherSideOuterStateView = (OuterJoinRecordStateView) otherSideStateView;
                         for (OuterRecord outerRecord : associatedRecords.getOuterRecords()) {
-                            if (outerRecord.numOfAssociations == 0) { // if the matched num in the matched rows == 0
+                            if (outerRecord.numOfAssociations == 0 && added) { // if the matched num in the matched rows == 0
                                 // send -D[null+other]
                                 outRow.setRowKind(RowKind.DELETE);
                                 outputNullPadding(outerRecord.record, !inputIsLeft);
@@ -345,7 +348,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                         // send +I/+U[record+other]s (using input RowKind)
                         outRow.setRowKind(inputRowKind);
                     }
-                    if (!isBatchMode()) {
+                    if (!isBatchMode() && added) {
                         // do not even retrieve records since the results are only used
                         // to emit and not mutate state, we do not want to waste cycles
                         for (RowData other : associatedRecords.getRecords()) {
