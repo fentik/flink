@@ -52,6 +52,8 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
     // RIGHT OUTER JOIN
     private final boolean rightIsOuter;
 
+    private final boolean isMinibatchEnabled;
+
     private transient JoinedRowData outRow;
     private transient RowData leftNullRow;
     private transient RowData rightNullRow;
@@ -91,6 +93,8 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                 isBatchBackfillEnabled);
         this.leftIsOuter = leftIsOuter;
         this.rightIsOuter = rightIsOuter;
+        // XXX(sergei) PARAMETERIZE ME
+        this.isMinibatchEnabled = true;
     }
 
     @Override
@@ -147,20 +151,26 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
 
     @Override
     public void processElement1(StreamRecord<RowData> element) throws Exception {
-        RowData input = element.getValue();
-        RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(leftType);
-        leftRecordStateView.addRecordToBatch(input);
-        LOG.info("MINIBATCH element 1 (left) input {} kind {} key {}", rowStringSerializer.asString(input), input.getRowKind(), getCurrentKey());
-        processElement(element.getValue(), leftRecordStateView, rightRecordStateView, true);
+        if (isMinibatchEnabled) {
+            RowData input = element.getValue();
+            RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(leftType);
+            LOG.info("MINIBATCH element 1 (left) input {} kind {} key {}", rowStringSerializer.asString(input), input.getRowKind(), getCurrentKey());
+            leftRecordStateView.addRecordToBatch(input);
+        } else {
+            processElement(element.getValue(), leftRecordStateView, rightRecordStateView, true);
+        }
     }
 
     @Override
     public void processElement2(StreamRecord<RowData> element) throws Exception {
-        RowData input = element.getValue();
-        RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(rightType);
-        rightRecordStateView.addRecordToBatch(input);
-        LOG.info("MINIBATCH element 2 (right) input {} kind {} key {}", rowStringSerializer.asString(input), input.getRowKind(), getCurrentKey());
-        processElement(element.getValue(), rightRecordStateView, leftRecordStateView, false);
+        if (isMinibatchEnabled) {
+            RowData input = element.getValue();
+            RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(rightType);
+            LOG.info("MINIBATCH element 2 (right) input {} kind {} key {}", rowStringSerializer.asString(input), input.getRowKind(), getCurrentKey());
+            rightRecordStateView.addRecordToBatch(input);
+        } else {
+            processElement(element.getValue(), rightRecordStateView, leftRecordStateView, false);
+        }
     }
 
     @Override
