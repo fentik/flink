@@ -346,8 +346,32 @@ public final class JoinRecordStateViews {
         }
 
         @Override
-        public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor process) throws Exception {
-            LOG.info("MINIBATCH {} getCurrentBatch()", this.getClass().getSimpleName());
+        public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor processRecord) throws Exception {
+            MapStateDescriptor<RowData, Integer> bufferStateDesc = new MapStateDescriptor<>(stateName + "-buffer", recordType,
+                    Types.INT);
+
+            be.applyToAllKeys(VoidNamespace.INSTANCE,
+                VoidNamespaceSerializer.INSTANCE,
+                bufferStateDesc,
+                new KeyedStateFunction<RowData, MapState<RowData, Integer>>() {
+                    @Override
+                    public void process(RowData key, MapState<RowData, Integer> state) throws Exception {
+                        // set current key context for otherView fetch
+                        be.setCurrentKey(key);
+
+                        for (Map.Entry<RowData, Integer> entry : state.entries()) {
+                            RowData record = entry.getKey();
+                            Integer count = entry.getValue();
+                            if (count < 0) {
+                                // records are retractions
+                                record.setRowKind(RowKind.DELETE);
+                            } else {
+                                record.setRowKind(RowKind.INSERT);
+                            }
+                            processRecord(record);
+                        }
+                    }
+                });
         }
 
         @Override
