@@ -117,8 +117,7 @@ public class StreamExecChangelogNormalize extends ExecNodeBase<RowData>
             @JsonProperty(FIELD_NAME_DESCRIPTION) String description) {
         super(id, context, persistedConfig, inputProperties, outputType, description);
         this.uniqueKeys = uniqueKeys;
-        // this.generateUpdateBefore = generateUpdateBefore;
-        this.generateUpdateBefore = false;
+        this.generateUpdateBefore = generateUpdateBefore;
     }
 
     @SuppressWarnings("unchecked")
@@ -141,6 +140,7 @@ public class StreamExecChangelogNormalize extends ExecNodeBase<RowData>
                 ignoredFields)
                 .generateRecordEqualiser("DeduplicateRowEqualiser");
 
+        LOG.info("CDC generateUpdateBefore {}", generateUpdateBefore);
         LOG.info("EQUALIZER code {}", generatedEqualiser.getCode());
 
         if (isMiniBatchEnabled) {
