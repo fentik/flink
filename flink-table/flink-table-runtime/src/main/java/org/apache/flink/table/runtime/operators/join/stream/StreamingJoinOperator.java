@@ -152,9 +152,9 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
     @Override
     public void processElement1(StreamRecord<RowData> element) throws Exception {
         if (isMinibatchEnabled) {
-            RowData input = element.getValue();
-            RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(leftType);
-            LOG.info("MINIBATCH element 1 (left) input {} kind {} key {}", rowStringSerializer.asString(input), input.getRowKind(), getCurrentKey());
+            // RowData input = element.getValue();
+            // RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(leftType);
+            // LOG.info("MINIBATCH element 1 (left) input {} kind {} key {}", rowStringSerializer.asString(input), input.getRowKind(), getCurrentKey());
             leftRecordStateView.addRecordToBatch(input);
         } else {
             processElement(element.getValue(), leftRecordStateView, rightRecordStateView, true);
@@ -164,9 +164,9 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
     @Override
     public void processElement2(StreamRecord<RowData> element) throws Exception {
         if (isMinibatchEnabled) {
-            RowData input = element.getValue();
-            RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(rightType);
-            LOG.info("MINIBATCH element 2 (right) input {} kind {} key {}", rowStringSerializer.asString(input), input.getRowKind(), getCurrentKey());
+            // RowData input = element.getValue();
+            // RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(rightType);
+            // LOG.info("MINIBATCH element 2 (right) input {} kind {} key {}", rowStringSerializer.asString(input), input.getRowKind(), getCurrentKey());
             rightRecordStateView.addRecordToBatch(input);
         } else {
             processElement(element.getValue(), rightRecordStateView, leftRecordStateView, false);
@@ -176,7 +176,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
     @Override
     public void processWatermark(Watermark mark) throws Exception {
         if (!isBatchMode()) {
-            LOG.info("MINIBATCH WATERMARK in streaming mode {}", mark);
+            // LOG.info("MINIBATCH WATERMARK in streaming mode {}", mark);
             rightRecordStateView.processBatch(getKeyedStateBackend(), record -> {
                 processElement(record, rightRecordStateView, leftRecordStateView, false);
             });

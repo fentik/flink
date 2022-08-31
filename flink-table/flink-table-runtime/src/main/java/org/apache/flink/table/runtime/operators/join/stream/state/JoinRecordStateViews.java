@@ -124,7 +124,6 @@ public final class JoinRecordStateViews {
         }
 
         public void addRecordToBatch(RowData record) throws Exception {
-            LOG.info("MINIBATCH {} addRecordToBatch", this.getClass().getSimpleName());
             RowData prevRow = bufferState.value();
             if (prevRow == null) {
                 // new state for key, could be acc or retract
@@ -149,7 +148,6 @@ public final class JoinRecordStateViews {
         }
 
         public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor processor) throws Exception {
-            LOG.info("MINIBATCH {} getCurrentBatch()", this.getClass().getSimpleName());
             ValueStateDescriptor<RowData> bufferStateDesc = new ValueStateDescriptor<>(stateName + "-buffer", recordType);
             be.applyToAllKeys(VoidNamespace.INSTANCE,
                 VoidNamespaceSerializer.INSTANCE,
@@ -385,14 +383,17 @@ public final class JoinRecordStateViews {
 
         @Override
         public void addRecordToBatch(RowData record) throws Exception {
-            Integer cnt = recordState.get(record);
+            RowKind origKind = record.getRowKind();
+            record.setRowKind(RowKind.INSERT);
+            Integer cnt = bufferState.get(record);
+            record.setRowKind(origKind);
+
             int delta = RowDataUtil.isAccumulateMsg(record) ? 1 : -1;
             if (cnt != null) {
                 cnt += delta;
             } else {
                 cnt = delta;
             }
-            LOG.info("MINIBATCH {} addRecordToBatch cnt {}", this.getClass().getSimpleName(), cnt);
             bufferState.put(record, cnt);
         }
 
