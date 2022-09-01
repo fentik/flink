@@ -191,11 +191,11 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
 
     @Override
     public void processElement1(StreamRecord<RowData> element) throws Exception {
-        if (isMinibatchEnabled && !isBatchMode) {
+        if (isMinibatchEnabled && !isBatchMode()) {
             RowData input = element.getValue();
             // RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(leftType);
-            LOG.debug("MINIBATCH element 1 (left) input {} kind {} key {}", rowStringSerializer.asString(input),
-                    input.getRowKind(), getCurrentKey());
+            // LOG.debug("MINIBATCH element 1 (left) input {} kind {} key {}", rowStringSerializer.asString(input),
+            //         input.getRowKind(), getCurrentKey());
             leftRecordStateBuffer.addRecordToBatch(input);
         } else {
             processElement(element.getValue(), leftRecordStateView, rightRecordStateView, true);
@@ -204,11 +204,11 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
 
     @Override
     public void processElement2(StreamRecord<RowData> element) throws Exception {
-        if (isMinibatchEnabled && !isBatchMode) {
+        if (isMinibatchEnabled && !isBatchMode()) {
             RowData input = element.getValue();
             // RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(rightType);
-            LOG.debug("MINIBATCH element 2 (right) input {} kind {} key {}", rowStringSerializer.asString(input),
-                    input.getRowKind(), getCurrentKey());
+            // LOG.debug("MINIBATCH element 2 (right) input {} kind {} key {}", rowStringSerializer.asString(input),
+            //         input.getRowKind(), getCurrentKey());
             rightRecordStateBuffer.addRecordToBatch(input);
         } else {
             processElement(element.getValue(), rightRecordStateView, leftRecordStateView, false);
