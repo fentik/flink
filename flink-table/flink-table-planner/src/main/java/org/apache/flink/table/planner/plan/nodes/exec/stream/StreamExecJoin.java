@@ -176,7 +176,9 @@ public class StreamExecJoin extends ExecNodeBase<RowData>
                             rightInputSpec,
                             joinSpec.getFilterNulls(),
                             minRetentionTime,
-                            isBatchBackfillEnabled);
+                            isBatchBackfillEnabled,
+                            isMinibatchEnabled,
+                            maxMinibatchSize);
         } else {
             boolean leftIsOuter = joinType == FlinkJoinType.LEFT || joinType == FlinkJoinType.FULL;
             boolean rightIsOuter =
