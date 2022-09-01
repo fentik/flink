@@ -6,11 +6,11 @@ import org.apache.flink.api.common.functions.RuntimeContext;
 import org.apache.flink.api.common.state.MapState;
 import org.apache.flink.api.common.state.MapStateDescriptor;
 import org.apache.flink.api.common.typeinfo.Types;
-import org.apache.flink.queryablestate.client.VoidNamespace;
-import org.apache.flink.queryablestate.client.VoidNamespaceSerializer;
 import org.apache.flink.runtime.state.KeyedStateBackend;
 import org.apache.flink.runtime.state.KeyedStateFunction;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.runtime.state.VoidNamespace;
+import org.apache.flink.runtime.state.VoidNamespaceSerializer;
 import org.apache.flink.table.data.util.RowDataUtil;
 import org.apache.flink.table.runtime.operators.join.stream.state.JoinBatchProcessor;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
@@ -41,14 +41,14 @@ public class MiniBatchInputSideHasNoUniqueKey extends AbstractMiniBatchJoinBuffe
         RowKind origKind = record.getRowKind();
         record.setRowKind(RowKind.INSERT);
         Integer cnt = bufferState.get(record);
-        LOG.info("MINIBATCH fetched count from state {}", cnt);
+        LOG.debug("MINIBATCH fetched count from state {}", cnt);
 
         if (cnt != null) {
             cnt += delta;
         } else {
             cnt = delta;
         }
-        LOG.info("MINIBATCH no unique: cnt {} origkind {}", cnt, origKind);
+        LOG.debug("MINIBATCH no unique: cnt {} origkind {}", cnt, origKind);
         if (cnt == 0) {
             bufferState.clear();
         } else {
@@ -57,7 +57,7 @@ public class MiniBatchInputSideHasNoUniqueKey extends AbstractMiniBatchJoinBuffe
     }
 
     public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor processor) throws Exception {
-        LOG.info("MINIBATCH emit for {}", stateName);
+        LOG.debug("MINIBATCH emit for {}", stateName);
 
         be.applyToAllKeys(VoidNamespace.INSTANCE,
                 VoidNamespaceSerializer.INSTANCE,
@@ -73,7 +73,7 @@ public class MiniBatchInputSideHasNoUniqueKey extends AbstractMiniBatchJoinBuffe
                             RowKind kind = count < 0 ? RowKind.DELETE : RowKind.INSERT;
                             while (count > 0) {
                                 // processor may overwrite kind, so reset it after every call
-                                LOG.info("MINIBATCH emit record {} kind {}", record, kind);
+                                LOG.debug("MINIBATCH emit record {} kind {}", record, kind);
                                 record.setRowKind(kind);
                                 processor.process(record);
                                 count--;
