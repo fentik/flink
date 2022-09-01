@@ -88,7 +88,8 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
             boolean rightIsOuter,
             boolean[] filterNullKeys,
             long stateRetentionTime,
-            boolean isBatchBackfillEnabled) {
+            boolean isBatchBackfillEnabled,
+            boolean isMinibatchEnabled) {
         super(
                 leftType,
                 rightType,
@@ -100,8 +101,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                 isBatchBackfillEnabled);
         this.leftIsOuter = leftIsOuter;
         this.rightIsOuter = rightIsOuter;
-        // XXX(sergei) PARAMETERIZE ME
-        this.isMinibatchEnabled = true;
+        this.isMinibatchEnabled = isMinibatchEnabled;
     }
 
     @Override
@@ -194,7 +194,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         if (isMinibatchEnabled) {
             RowData input = element.getValue();
             RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(leftType);
-            LOG.info("MINIBATCH element 1 (left) input {} kind {} key {}", rowStringSerializer.asString(input),
+            LOG.debug("MINIBATCH element 1 (left) input {} kind {} key {}", rowStringSerializer.asString(input),
                     input.getRowKind(), getCurrentKey());
             leftRecordStateBuffer.addRecordToBatch(input);
         } else {
@@ -207,7 +207,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         if (isMinibatchEnabled) {
             RowData input = element.getValue();
             RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(rightType);
-            LOG.info("MINIBATCH element 2 (right) input {} kind {} key {}", rowStringSerializer.asString(input),
+            LOG.debug("MINIBATCH element 2 (right) input {} kind {} key {}", rowStringSerializer.asString(input),
                     input.getRowKind(), getCurrentKey());
             rightRecordStateBuffer.addRecordToBatch(input);
         } else {
@@ -215,16 +215,20 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         }
     }
 
+    private void flushMiniBatch() throws Exception {
+        rightRecordStateBuffer.processBatch(getKeyedStateBackend(), record -> {
+            processElement(record, rightRecordStateView, leftRecordStateView, false);
+        });
+        leftRecordStateBuffer.processBatch(getKeyedStateBackend(), record -> {
+            processElement(record, leftRecordStateView, rightRecordStateView, true);
+        });
+    }
+
     @Override
     public void processWatermark(Watermark mark) throws Exception {
         if (!isBatchMode()) {
-            // LOG.info("MINIBATCH WATERMARK in streaming mode {}", mark);
-            rightRecordStateBuffer.processBatch(getKeyedStateBackend(), record -> {
-                processElement(record, rightRecordStateView, leftRecordStateView, false);
-            });
-            leftRecordStateBuffer.processBatch(getKeyedStateBackend(), record -> {
-                processElement(record, leftRecordStateView, rightRecordStateView, true);
-            });
+            LOG.debug("MINIBATCH WATERMARK in streaming mode {}", mark);
+            flushMiniBatch();
         }
         super.processWatermark(mark);
     }
@@ -232,6 +236,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
     @Override
     public void prepareSnapshotPreBarrier(long checkpointId) throws Exception {
         LOG.info("MINIBATCH prepareSnapshotPreBarrier");
+        flushMiniBatch();
         super.prepareSnapshotPreBarrier(checkpointId);
     }
 
