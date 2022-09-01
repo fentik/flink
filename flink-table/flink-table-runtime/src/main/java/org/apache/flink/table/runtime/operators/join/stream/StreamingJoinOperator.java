@@ -232,7 +232,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         });
     }
 
-    private void flushRighMinibatch() {
+    private void flushRighMinibatch() throws Exception {
         rightRecordStateBuffer.processBatch(getKeyedStateBackend(), record -> {
             processElement(record, rightRecordStateView, leftRecordStateView, false);
         });
