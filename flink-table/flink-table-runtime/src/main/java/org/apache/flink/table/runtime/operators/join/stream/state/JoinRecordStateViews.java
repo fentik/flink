@@ -90,7 +90,6 @@ public final class JoinRecordStateViews {
     private static final class JoinKeyContainsUniqueKey implements JoinRecordStateView {
 
         private final ValueState<RowData> recordState;
-        private final ValueState<RowData> bufferState;
         private final List<RowData> reusedList;
         private final String stateName;
         private final InternalTypeInfo<RowData> recordType;
@@ -101,13 +100,10 @@ public final class JoinRecordStateViews {
                 InternalTypeInfo<RowData> recordType,
                 StateTtlConfig ttlConfig) {
             ValueStateDescriptor<RowData> recordStateDesc = new ValueStateDescriptor<>(stateName, recordType);
-            ValueStateDescriptor<RowData> bufferStateDesc = new ValueStateDescriptor<>(stateName + "-buffer",
-                    recordType);
             if (ttlConfig.isEnabled()) {
                 recordStateDesc.enableTimeToLive(ttlConfig);
             }
             this.recordState = ctx.getState(recordStateDesc);
-            this.bufferState = ctx.getState(bufferStateDesc);
             // the result records always not more than 1
             this.reusedList = new ArrayList<>(1);
             this.stateName = stateName;
@@ -122,48 +118,6 @@ public final class JoinRecordStateViews {
         @Override
         public void retractRecord(RowData record) throws Exception {
             recordState.clear();
-        }
-
-        public void addRecordToBatch(RowData record) throws Exception {
-            RowData prevRow = bufferState.value();
-            if (prevRow == null) {
-                // new state for key, could be acc or retract
-                bufferState.update(record);
-            } else {
-                if (RowDataUtil.isAccumulateMsg(prevRow)) {
-                    if (RowDataUtil.isAccumulateMsg(record)) {
-                        LOG.warn("MINIBATCH {} two sequential inserts!", this.getClass().getSimpleName());
-                    } else {
-                        // existing message is +I/+U and incoming is -D/-U: clear state
-                        bufferState.clear();
-                    }
-                } else {
-                    if (RowDataUtil.isAccumulateMsg(record)) {
-                        // existing message is -D/-U and incoming is +I/+U: clear
-                        bufferState.clear();
-                    } else {
-                        LOG.warn("MINIBATCH {} two sequential retractions!", this.getClass().getSimpleName());
-                    }
-                }
-            }
-        }
-
-        public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor processor) throws Exception {
-            ValueStateDescriptor<RowData> bufferStateDesc = new ValueStateDescriptor<>(stateName + "-buffer",
-                    recordType);
-            be.applyToAllKeys(VoidNamespace.INSTANCE,
-                    VoidNamespaceSerializer.INSTANCE,
-                    bufferStateDesc,
-                    new KeyedStateFunction<RowData, ValueState<RowData>>() {
-                        @Override
-                        public void process(RowData key, ValueState<RowData> state) throws Exception {
-                            RowData record = state.value();
-                            // set current key context for otherView fetch
-                            be.setCurrentKey(key);
-                            processor.process(record);
-                            bufferState.clear();
-                        }
-                    });
         }
 
         @Override
@@ -266,49 +220,6 @@ public final class JoinRecordStateViews {
         }
 
         @Override
-        public void addRecordToBatch(RowData record) throws Exception {
-            RowData uniqueKey = uniqueKeySelector.getKey(record);
-            RowData prevRow = bufferState.get(uniqueKey);
-            if (prevRow == null) {
-                bufferState.put(uniqueKey, record);
-            } else {
-                if (RowDataUtil.isAccumulateMsg(record)) {
-                    if (RowDataUtil.isAccumulateMsg(prevRow)) {
-                        LOG.warn("MINIBATCH invalid buffer state -- two sequential row additions!");
-                    } else {
-                        bufferState.remove(uniqueKey);
-                    }
-                } else {
-                    if (RowDataUtil.isAccumulateMsg(prevRow)) {
-                        bufferState.put(uniqueKey, record);
-                    } else {
-                        LOG.warn("MINIBATCH invalid buffer state -- two sequential row retractions!");
-                    }
-                }
-            }
-        }
-
-        @Override
-        public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor processor) throws Exception {
-            MapStateDescriptor<RowData, RowData> bufferStateDesc = new MapStateDescriptor<>(stateName + "-buffer",
-                    uniqueKeyType,
-                    recordType);
-            be.applyToAllKeys(VoidNamespace.INSTANCE,
-                    VoidNamespaceSerializer.INSTANCE,
-                    bufferStateDesc,
-                    new KeyedStateFunction<RowData, MapState<RowData, RowData>>() {
-                        @Override
-                        public void process(RowData key, MapState<RowData, RowData> state) throws Exception {
-                            be.setCurrentKey(key);
-                            for (RowData record : state.values()) {
-                                processor.process(record);
-                            }
-                            bufferState.clear();
-                        }
-                    });
-        }
-
-        @Override
         public Iterable<RowData> getRecords() throws Exception {
             return recordState.values();
         }
@@ -356,14 +267,6 @@ public final class JoinRecordStateViews {
     private static final class InputSideHasNoUniqueKey implements JoinRecordStateView {
 
         private final MapState<RowData, Integer> recordState;
-
-        /*
-         * On +I/+U increment
-         * On -D/-U decrement
-         * Then emit count retracts if negative or accumulate if positive
-         */
-        private final MapState<RowData, Integer> bufferState;
-
         private final InternalTypeInfo<RowData> recordType;
         private final String stateName;
 
@@ -374,70 +277,13 @@ public final class JoinRecordStateViews {
                 StateTtlConfig ttlConfig) {
             MapStateDescriptor<RowData, Integer> recordStateDesc = new MapStateDescriptor<>(stateName, recordType,
                     Types.INT);
-            MapStateDescriptor<RowData, Integer> bufferStateDesc = new MapStateDescriptor<>(stateName + "-buffer",
-                    recordType,
-                    Types.INT);
+
             if (ttlConfig.isEnabled()) {
                 recordStateDesc.enableTimeToLive(ttlConfig);
             }
             this.stateName = stateName;
             this.recordType = recordType;
             this.recordState = ctx.getMapState(recordStateDesc);
-            this.bufferState = ctx.getMapState(bufferStateDesc);
-        }
-
-        @Override
-        public void addRecordToBatch(RowData record) throws Exception {
-            int delta = RowDataUtil.isAccumulateMsg(record) ? 1 : -1;
-            RowKind origKind = record.getRowKind();
-            record.setRowKind(RowKind.INSERT);
-            Integer cnt = bufferState.get(record);
-            LOG.info("MINIBATCH fetched count from state {}", cnt);
-
-            if (cnt != null) {
-                cnt += delta;
-            } else {
-                cnt = delta;
-            }
-            LOG.info("MINIBATCH no unique: cnt {} origkind {}", cnt, origKind);
-            if (cnt == 0) {
-                bufferState.clear();
-            } else {
-                bufferState.put(record, cnt);
-            }
-        }
-
-        @Override
-        public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor processor) throws Exception {
-            MapStateDescriptor<RowData, Integer> bufferStateDesc = new MapStateDescriptor<>(stateName + "-buffer",
-                    recordType,
-                    Types.INT);
-
-            LOG.info("MINIBATCH emit for {}", stateName);
-
-            be.applyToAllKeys(VoidNamespace.INSTANCE,
-                    VoidNamespaceSerializer.INSTANCE,
-                    bufferStateDesc,
-                    new KeyedStateFunction<RowData, MapState<RowData, Integer>>() {
-                        @Override
-                        public void process(RowData key, MapState<RowData, Integer> state) throws Exception {
-                            be.setCurrentKey(key);
-
-                            for (Map.Entry<RowData, Integer> entry : state.entries()) {
-                                RowData record = entry.getKey();
-                                Integer count = entry.getValue();
-                                RowKind kind = count < 0 ? RowKind.DELETE : RowKind.INSERT;
-                                while (count > 0) {
-                                    // processor may overwrite kind, so reset it after every call
-                                    LOG.info("MINIBATCH emit record {} kind {}", record, kind);
-                                    record.setRowKind(kind);
-                                    processor.process(record);
-                                    count--;
-                                }
-                            }
-                            bufferState.clear();
-                        }
-                    });
         }
 
         @Override

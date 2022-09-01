@@ -28,6 +28,10 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.util.RowDataUtil;
 import org.apache.flink.table.data.utils.JoinedRowData;
 import org.apache.flink.table.runtime.generated.GeneratedJoinCondition;
+import org.apache.flink.table.runtime.operators.join.stream.minibatch.MiniBatchInputSideHasNoUniqueKey;
+import org.apache.flink.table.runtime.operators.join.stream.minibatch.MiniBatchJoinBuffer;
+import org.apache.flink.table.runtime.operators.join.stream.minibatch.MiniBatchJoinInputSideHasUniqueKey;
+import org.apache.flink.table.runtime.operators.join.stream.minibatch.MiniBatchJoinKeyContainsUniqueKey;
 import org.apache.flink.table.runtime.operators.join.stream.state.JoinInputSideSpec;
 import org.apache.flink.table.runtime.operators.join.stream.state.JoinRecordStateView;
 import org.apache.flink.table.runtime.operators.join.stream.state.JoinRecordStateViews;
@@ -60,8 +64,11 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
 
     // left join state
     private transient JoinRecordStateView leftRecordStateView;
+    private transient MiniBatchJoinBuffer leftRecordStateBuffer;
+
     // right join state
     private transient JoinRecordStateView rightRecordStateView;
+    private transient MiniBatchJoinBuffer rightRecordStateBuffer;
 
     // Stats related to associatedRecords for each processed row. Helps us
     // understand the overhead of
@@ -147,6 +154,39 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                     rightType,
                     stateRetentionTime);
         }
+
+        // initialize minibatch buffer states
+        if (isMinibatchEnabled) {
+            if (leftInputSideSpec.hasUniqueKey()) {
+                if (leftInputSideSpec.joinKeyContainsUniqueKey()) {
+                    leftRecordStateBuffer = new MiniBatchJoinKeyContainsUniqueKey(getRuntimeContext(),
+                            "left-records-buffer", leftType);
+                } else {
+                    leftRecordStateBuffer = new MiniBatchJoinInputSideHasUniqueKey(
+                            getRuntimeContext(), "left-records-buffer", leftType,
+                            leftInputSideSpec.getUniqueKeyType(),
+                            leftInputSideSpec.getUniqueKeySelector());
+                }
+            } else {
+                leftRecordStateBuffer = new MiniBatchInputSideHasNoUniqueKey(getRuntimeContext(),
+                        "left-records-buffer", leftType);
+            }
+
+            if (rightInputSideSpec.hasUniqueKey()) {
+                if (rightInputSideSpec.joinKeyContainsUniqueKey()) {
+                    rightRecordStateBuffer = new MiniBatchJoinKeyContainsUniqueKey(getRuntimeContext(),
+                            "right-records-buffer", rightType);
+                } else {
+                    rightRecordStateBuffer = new MiniBatchJoinInputSideHasUniqueKey(
+                            getRuntimeContext(), "right-records-buffer", rightType,
+                            rightInputSideSpec.getUniqueKeyType(),
+                            rightInputSideSpec.getUniqueKeySelector());
+                }
+            } else {
+                rightRecordStateBuffer = new MiniBatchInputSideHasNoUniqueKey(getRuntimeContext(),
+                        "right-records-buffer", rightType);
+            }
+        }
     }
 
     @Override
@@ -154,8 +194,9 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         if (isMinibatchEnabled) {
             RowData input = element.getValue();
             RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(leftType);
-            LOG.info("MINIBATCH element 1 (left) input {} kind {} key {}", rowStringSerializer.asString(input), input.getRowKind(), getCurrentKey());
-            leftRecordStateView.addRecordToBatch(input);
+            LOG.info("MINIBATCH element 1 (left) input {} kind {} key {}", rowStringSerializer.asString(input),
+                    input.getRowKind(), getCurrentKey());
+            leftRecordStateBuffer.addRecordToBatch(input);
         } else {
             processElement(element.getValue(), leftRecordStateView, rightRecordStateView, true);
         }
@@ -166,8 +207,9 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         if (isMinibatchEnabled) {
             RowData input = element.getValue();
             RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(rightType);
-            LOG.info("MINIBATCH element 2 (right) input {} kind {} key {}", rowStringSerializer.asString(input), input.getRowKind(), getCurrentKey());
-            rightRecordStateView.addRecordToBatch(input);
+            LOG.info("MINIBATCH element 2 (right) input {} kind {} key {}", rowStringSerializer.asString(input),
+                    input.getRowKind(), getCurrentKey());
+            rightRecordStateBuffer.addRecordToBatch(input);
         } else {
             processElement(element.getValue(), rightRecordStateView, leftRecordStateView, false);
         }
@@ -177,16 +219,15 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
     public void processWatermark(Watermark mark) throws Exception {
         if (!isBatchMode()) {
             // LOG.info("MINIBATCH WATERMARK in streaming mode {}", mark);
-            rightRecordStateView.processBatch(getKeyedStateBackend(), record -> {
+            rightRecordStateBuffer.processBatch(getKeyedStateBackend(), record -> {
                 processElement(record, rightRecordStateView, leftRecordStateView, false);
             });
-            leftRecordStateView.processBatch(getKeyedStateBackend(), record -> {
+            leftRecordStateBuffer.processBatch(getKeyedStateBackend(), record -> {
                 processElement(record, leftRecordStateView, rightRecordStateView, true);
             });
         }
         super.processWatermark(mark);
     }
-
 
     @Override
     public void prepareSnapshotPreBarrier(long checkpointId) throws Exception {
@@ -204,7 +245,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         LOG.info("{} emit and switch to streaming", getPrintableName());
         if (leftIsOuter) {
             leftRecordStateView.emitCompleteState(getKeyedStateBackend(), this.collector,
-                rightRecordStateView, joinCondition, false, true /* inputIsLeft */);
+                    rightRecordStateView, joinCondition, false, true /* inputIsLeft */);
             if (rightIsOuter) {
                 // FULL JOIN condition, we want to emit the following
                 // leftState -> emitComplete
@@ -212,16 +253,16 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
 
                 OuterJoinRecordStateView rightView = (OuterJoinRecordStateView) rightRecordStateView;
                 rightView.emitAntiJoinState(getKeyedStateBackend(), this.collector,
-                    leftRecordStateView, joinCondition, false, false /* inputIsLeft */);
+                        leftRecordStateView, joinCondition, false, false /* inputIsLeft */);
             }
         } else if (rightIsOuter) {
             // RIGHT OUTER JOIN
             rightRecordStateView.emitCompleteState(getKeyedStateBackend(), this.collector,
-                leftRecordStateView, joinCondition, false, false /* inputIsLeft */);
+                    leftRecordStateView, joinCondition, false, false /* inputIsLeft */);
         } else {
             // standard inner join
             leftRecordStateView.emitCompleteState(getKeyedStateBackend(), this.collector,
-                rightRecordStateView, joinCondition, false, true /* inputIsLeft */);
+                    rightRecordStateView, joinCondition, false, true /* inputIsLeft */);
         }
 
         setStreamMode(true);

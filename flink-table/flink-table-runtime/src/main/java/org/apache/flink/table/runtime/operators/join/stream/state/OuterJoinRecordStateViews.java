@@ -199,16 +199,6 @@ public final class OuterJoinRecordStateViews {
         }
 
         @Override
-        public void addRecordToBatch(RowData record) throws Exception {
-            LOG.info("MINIBATCH {} addRecordToBatch", this.getClass().getSimpleName());
-        }
-
-        @Override
-        public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor process) throws Exception {
-            LOG.info("MINIBATCH {} getCurrentBatch()", this.getClass().getSimpleName());
-        }
-
-        @Override
         public void addRecord(RowData record) throws Exception {
             addRecord(record, -1);
         }
@@ -333,16 +323,6 @@ public final class OuterJoinRecordStateViews {
         }
 
         @Override
-        public void addRecordToBatch(RowData record) throws Exception {
-            LOG.info("MINIBATCH {} addRecordToBatch", this.getClass().getSimpleName());
-        }
-
-        @Override
-        public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor process) throws Exception {
-            LOG.info("MINIBATCH {} getCurrentBatch()", this.getClass().getSimpleName());
-        }
-
-        @Override
         public void addRecord(RowData record) throws Exception {
             addRecord(record, -1);
         }
@@ -449,16 +429,6 @@ public final class OuterJoinRecordStateViews {
             this.otherNullRow = new GenericRowData(otherRecordType.toRowSize());
             this.recordSerializer = new RowDataStringSerializer(recordType);
             this.otherRecordSerializer = new RowDataStringSerializer(otherRecordType);
-        }
-
-        @Override
-        public void addRecordToBatch(RowData record) throws Exception {
-            LOG.info("MINIBATCH {} addRecordToBatch", this.getClass().getSimpleName());
-        }
-
-        @Override
-        public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor process) throws Exception {
-            LOG.info("MINIBATCH {} getCurrentBatch()", this.getClass().getSimpleName());
         }
 
         @Override
