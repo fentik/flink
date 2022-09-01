@@ -358,6 +358,15 @@ public class ExecutionConfigOptions {
                             + TABLE_EXEC_MINIBATCH_ENABLED.key()
                             + " is set true, its value must be positive.");
 
+    @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
+    public static final ConfigOption<Integer> TABLE_EXEC_MINIBATCH_JOIN_MAX_SIZE = key("table.exec.mini-batch.join.size")
+            .intType()
+            .defaultValue(100000)
+            .withDescription(
+                    "The maximum number of input records can be buffered for MiniBatch for JOIN operators. "
+                            + "MiniBatch is an optimization to buffer input records to reduce state access. "
+                            + "MiniBatch is triggered with the allowed latency interval and when the maximum number of buffered records reached. ");
+
     // ------------------------------------------------------------------------
     // Backfill Exec Options
     // ------------------------------------------------------------------------

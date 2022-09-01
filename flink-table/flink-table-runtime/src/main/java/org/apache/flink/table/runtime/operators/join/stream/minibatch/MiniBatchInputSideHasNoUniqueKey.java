@@ -30,7 +30,9 @@ public class MiniBatchInputSideHasNoUniqueKey extends AbstractMiniBatchJoinBuffe
     public MiniBatchInputSideHasNoUniqueKey(
             RuntimeContext ctx,
             String stateName,
-            InternalTypeInfo<RowData> recordType) {
+            InternalTypeInfo<RowData> recordType,
+            int maxBatchSize) {
+        super(maxBatchSize);
         this.stateName = stateName;
         this.bufferStateDesc = new MapStateDescriptor<>(this.stateName, recordType, Types.INT);
         this.bufferState = ctx.getMapState(bufferStateDesc);
@@ -54,11 +56,11 @@ public class MiniBatchInputSideHasNoUniqueKey extends AbstractMiniBatchJoinBuffe
         } else {
             bufferState.put(record, cnt);
         }
+
+        recordAdded();
     }
 
     public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor processor) throws Exception {
-        LOG.debug("MINIBATCH emit for {}", stateName);
-
         be.applyToAllKeys(VoidNamespace.INSTANCE,
                 VoidNamespaceSerializer.INSTANCE,
                 bufferStateDesc,
@@ -76,11 +78,13 @@ public class MiniBatchInputSideHasNoUniqueKey extends AbstractMiniBatchJoinBuffe
                                 LOG.debug("MINIBATCH emit record {} kind {}", record, kind);
                                 record.setRowKind(kind);
                                 processor.process(record);
+                                recordEmitted();
                                 count--;
                             }
                         }
                         bufferState.clear();
                     }
                 });
+        batchProcessed();
     }
 }

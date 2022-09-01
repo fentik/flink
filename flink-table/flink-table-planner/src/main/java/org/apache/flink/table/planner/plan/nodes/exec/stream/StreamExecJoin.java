@@ -161,6 +161,7 @@ public class StreamExecJoin extends ExecNodeBase<RowData>
 
         final boolean isBatchBackfillEnabled = config.get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL);
         final boolean isMinibatchEnabled = config.get(ExecutionConfigOptions.TABLE_EXEC_MINIBATCH_ENABLED);
+        final int maxMinibatchSize = config.get(ExecutionConfigOptions.TABLE_EXEC_MINIBATCH_JOIN_MAX_SIZE);
 
         AbstractStreamingJoinOperator operator;
         FlinkJoinType joinType = joinSpec.getJoinType();
@@ -192,7 +193,8 @@ public class StreamExecJoin extends ExecNodeBase<RowData>
                             joinSpec.getFilterNulls(),
                             minRetentionTime,
                             isBatchBackfillEnabled,
-                            isMinibatchEnabled);
+                            isMinibatchEnabled,
+                            maxMinibatchSize);
         }
 
         final RowType returnType = (RowType) getOutputType();

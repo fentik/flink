@@ -30,7 +30,9 @@ public class MiniBatchJoinInputSideHasUniqueKey extends AbstractMiniBatchJoinBuf
             String stateName,
             InternalTypeInfo<RowData> recordType,
             InternalTypeInfo<RowData> uniqueKeyType,
-            KeySelector<RowData, RowData> uniqueKeySelector) {
+            KeySelector<RowData, RowData> uniqueKeySelector,
+            int maxBatchSize) {
+        super(maxBatchSize);
         this.stateName = stateName;
         this.bufferStateDesc = new MapStateDescriptor<>(this.stateName, uniqueKeyType, recordType);
         this.bufferState = ctx.getMapState(bufferStateDesc);
@@ -59,6 +61,8 @@ public class MiniBatchJoinInputSideHasUniqueKey extends AbstractMiniBatchJoinBuf
                 }
             }
         }
+
+        recordAdded();
     }
 
     @Override
@@ -72,10 +76,12 @@ public class MiniBatchJoinInputSideHasUniqueKey extends AbstractMiniBatchJoinBuf
                         be.setCurrentKey(key);
                         for (RowData record : state.values()) {
                             processor.process(record);
+                            recordEmitted();
                         }
                         bufferState.clear();
                     }
                 });
+        batchProcessed();
     }
 
 }

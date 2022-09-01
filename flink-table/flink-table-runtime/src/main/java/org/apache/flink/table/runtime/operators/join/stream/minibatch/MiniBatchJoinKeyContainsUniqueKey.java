@@ -21,7 +21,9 @@ public class MiniBatchJoinKeyContainsUniqueKey extends AbstractMiniBatchJoinBuff
     public MiniBatchJoinKeyContainsUniqueKey(
             RuntimeContext ctx,
             String stateName,
-            InternalTypeInfo<RowData> recordType) {
+            InternalTypeInfo<RowData> recordType,
+            int maxBatchSize) {
+        super(maxBatchSize);
         this.stateName = stateName;
         this.bufferStateDesc = new ValueStateDescriptor<>(this.stateName, recordType);
         this.bufferState = ctx.getState(bufferStateDesc);
@@ -49,6 +51,8 @@ public class MiniBatchJoinKeyContainsUniqueKey extends AbstractMiniBatchJoinBuff
                 }
             }
         }
+
+        recordAdded();
     }
 
     public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor processor) throws Exception {
@@ -58,13 +62,16 @@ public class MiniBatchJoinKeyContainsUniqueKey extends AbstractMiniBatchJoinBuff
                 new KeyedStateFunction<RowData, ValueState<RowData>>() {
                     @Override
                     public void process(RowData key, ValueState<RowData> state) throws Exception {
+                        int recordsEmitted = 0;
                         RowData record = state.value();
                         // set current key context for otherView fetch
                         be.setCurrentKey(key);
                         processor.process(record);
+                        recordEmitted();
                         bufferState.clear();
                     }
                 });
+        batchProcessed();
     }
 
 }
