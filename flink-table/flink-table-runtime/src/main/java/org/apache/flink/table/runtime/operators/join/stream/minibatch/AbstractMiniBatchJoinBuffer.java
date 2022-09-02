@@ -33,7 +33,7 @@ abstract public class AbstractMiniBatchJoinBuffer {
     protected void batchProcessed() {
         LOG.info("MINIBATCH emitted {} records with ratio of {}",
             currentEmittedCount,
-            currentEmittedCount/ currentBatchSize);
+            currentBatchSize == 0 ? 0 : currentEmittedCount / currentBatchSize);
         currentBatchSize = 0;
         currentEmittedCount = 0;
     }
