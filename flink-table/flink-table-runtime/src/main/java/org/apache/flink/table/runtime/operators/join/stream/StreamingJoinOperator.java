@@ -28,10 +28,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.util.RowDataUtil;
 import org.apache.flink.table.data.utils.JoinedRowData;
 import org.apache.flink.table.runtime.generated.GeneratedJoinCondition;
-import org.apache.flink.table.runtime.operators.join.stream.minibatch.MiniBatchInputSideHasNoUniqueKey;
 import org.apache.flink.table.runtime.operators.join.stream.minibatch.MiniBatchJoinBuffer;
-import org.apache.flink.table.runtime.operators.join.stream.minibatch.MiniBatchJoinInputSideHasUniqueKey;
-import org.apache.flink.table.runtime.operators.join.stream.minibatch.MiniBatchJoinKeyContainsUniqueKey;
 import org.apache.flink.table.runtime.operators.join.stream.state.JoinInputSideSpec;
 import org.apache.flink.table.runtime.operators.join.stream.state.JoinRecordStateView;
 import org.apache.flink.table.runtime.operators.join.stream.state.JoinRecordStateViews;
@@ -41,7 +38,8 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.table.runtime.util.RowDataStringSerializer;
 import org.apache.flink.streaming.api.watermark.Watermark;
-
+import org.apache.flink.runtime.state.KeyedStateBackend;
+import org.apache.flink.api.java.functions.KeySelector;
 /**
  * Streaming unbounded Join operator which supports INNER/LEFT/RIGHT/FULL JOIN.
  */
@@ -160,37 +158,10 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
 
         // initialize minibatch buffer states
         if (isMinibatchEnabled) {
-            if (leftInputSideSpec.hasUniqueKey()) {
-                if (leftInputSideSpec.joinKeyContainsUniqueKey()) {
-                    leftRecordStateBuffer = new MiniBatchJoinKeyContainsUniqueKey(getRuntimeContext(),
-                            "left-records-buffer", leftType, maxMinibatchSize);
-                } else {
-                    leftRecordStateBuffer = new MiniBatchJoinInputSideHasUniqueKey(
-                            getRuntimeContext(), "left-records-buffer", leftType,
-                            leftInputSideSpec.getUniqueKeyType(),
-                            leftInputSideSpec.getUniqueKeySelector(),
-                            maxMinibatchSize);
-                }
-            } else {
-                leftRecordStateBuffer = new MiniBatchInputSideHasNoUniqueKey(getRuntimeContext(),
-                        "left-records-buffer", leftType, maxMinibatchSize);
-            }
-
-            if (rightInputSideSpec.hasUniqueKey()) {
-                if (rightInputSideSpec.joinKeyContainsUniqueKey()) {
-                    rightRecordStateBuffer = new MiniBatchJoinKeyContainsUniqueKey(getRuntimeContext(),
-                            "right-records-buffer", rightType, maxMinibatchSize);
-                } else {
-                    rightRecordStateBuffer = new MiniBatchJoinInputSideHasUniqueKey(
-                            getRuntimeContext(), "right-records-buffer", rightType,
-                            rightInputSideSpec.getUniqueKeyType(),
-                            rightInputSideSpec.getUniqueKeySelector(),
-                            maxMinibatchSize);
-                }
-            } else {
-                rightRecordStateBuffer = new MiniBatchInputSideHasNoUniqueKey(getRuntimeContext(),
-                        "right-records-buffer", rightType, maxMinibatchSize);
-            }
+            leftRecordStateBuffer = new MiniBatchJoinBuffer(
+                (KeySelector<RowData, RowData>) stateKeySelector1, maxMinibatchSize);
+            rightRecordStateBuffer = new MiniBatchJoinBuffer(
+                (KeySelector<RowData, RowData>) stateKeySelector2, maxMinibatchSize);
         }
     }
 
