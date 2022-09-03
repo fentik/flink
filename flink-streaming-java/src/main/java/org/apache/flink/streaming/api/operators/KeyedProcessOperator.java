@@ -96,7 +96,7 @@ public class KeyedProcessOperator<K, IN, OUT>
     }
 
     public void processWatermark(Watermark mark) throws Exception {
-        LOG.info("WATERMARK isBatchCapable = {} isBatchMode = {} {} {}", userFunction.isHybridStreamBatchCapable(),
+        LOG.debug("WATERMARK isBatchCapable = {} isBatchMode = {} {} {}", userFunction.isHybridStreamBatchCapable(),
                 userFunction.isBatchMode(), getPrintableName(), mark);
 
         if (userFunction.isBatchMode()) {

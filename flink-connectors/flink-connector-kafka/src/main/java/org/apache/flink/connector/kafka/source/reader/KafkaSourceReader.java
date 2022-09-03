@@ -134,7 +134,7 @@ public class KafkaSourceReader<T>
             }
         }
 
-        LOG.info("SNAPSHOT returning split {}", splits);
+        LOG.debug("SNAPSHOT returning split {}", splits);
         return splits;
     }
 
