@@ -18,6 +18,8 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.api.java.functions.KeySelector;
+import org.apache.flink.table.runtime.util.RowDataStringSerializer;
+
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,21 +34,24 @@ public class MiniBatchJoinBuffer {
      */
     private final HashMap<RowData, Integer> buffer;
     private final KeySelector<RowData, RowData> keySelector;
+    private final InternalTypeInfo<RowData> recordType;
+    private final RowDataStringSerializer recordStringSerializer;
 
     private long currentBatchCount;
-    private long currentBatchByteSize;
     private long currentEmittedCount;
     private long maxBatchCount;
 
     public MiniBatchJoinBuffer(
+            InternalTypeInfo<RowData> recordType,
             KeySelector<RowData, RowData> keySelector,
             int maxBatchCount) {
         this.maxBatchCount = maxBatchCount;
         this.currentBatchCount = 0;
-        this.currentBatchByteSize = 0;
         this.currentEmittedCount = 0;
         this.buffer = new HashMap<>();
         this.keySelector = keySelector;
+        this.recordType = recordType;
+        this.recordStringSerializer = new RowDataStringSerializer(recordType);
 
     }
 
@@ -56,14 +61,15 @@ public class MiniBatchJoinBuffer {
         RowKind origKind = record.getRowKind();
         record.setRowKind(RowKind.INSERT);
         Integer cnt = buffer.get(record);
-        LOG.debug("MINIBATCH fetched count from state {}", cnt);
+
+        LOG.info("MINIBATCH adding record {} cnt {}", recordAsString(input), cnt);
 
         if (cnt != null) {
             cnt += delta;
         } else {
             cnt = delta;
         }
-        LOG.debug("MINIBATCH no unique: cnt {} origkind {}", cnt, origKind);
+        LOG.info("MINIBATCH no unique: cnt {} origkind {}", cnt, origKind);
         if (cnt == 0) {
             buffer.remove(record);
         } else {
@@ -78,13 +84,13 @@ public class MiniBatchJoinBuffer {
             RowData record = entry.getKey();
             Integer count = entry.getValue();
             RowKind kind = count < 0 ? RowKind.DELETE : RowKind.INSERT;
-            while (count > 0) {
+            LOG.debug("MINIBATCH emitter rec {} kind {} count {}", recordAsString(record), kind, count);
+            for (count = Math.abs(count); count > 0; count--) {
                 // processor may overwrite kind, so reset it after every call
                 be.setCurrentKey(keySelector.getKey(record));
                 record.setRowKind(kind);
                 processor.process(record);
                 recordEmitted();
-                count--;
             }
         }
         buffer.clear();
@@ -93,7 +99,6 @@ public class MiniBatchJoinBuffer {
 
     private void recordAdded(long byteSize) {
         currentBatchCount += 1;
-        currentBatchByteSize += byteSize;
     }
 
     private void recordEmitted() {
@@ -104,13 +109,16 @@ public class MiniBatchJoinBuffer {
         return currentBatchCount > maxBatchCount;
     }
 
+    private String recordAsString(RowData record) {
+        return recordStringSerializer.asString(record);
+    }
+
     private void batchProcessed() {
-        if (currentBatchCount > 100) {
-            LOG.info("MINIBATCH emitted {} records out of {} recieved {} bytes in state",
-                    currentEmittedCount, currentBatchCount, currentBatchByteSize);
+        if (currentBatchCount > 10) {
+            LOG.info("MINIBATCH emitted {} records out of {} recieved",
+                    currentEmittedCount, currentBatchCount);
         }
         currentBatchCount = 0;
         currentEmittedCount = 0;
-        currentBatchByteSize = 0;
     }
 }

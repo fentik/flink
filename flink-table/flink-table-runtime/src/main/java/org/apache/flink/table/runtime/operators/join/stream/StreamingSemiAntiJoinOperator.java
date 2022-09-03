@@ -102,9 +102,9 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
         // initialize minibatch buffer states
         if (isMinibatchEnabled) {
             leftRecordStateBuffer = new MiniBatchJoinBuffer(
-                (KeySelector<RowData, RowData>) stateKeySelector1, maxMinibatchSize);
+                leftType, (KeySelector<RowData, RowData>) stateKeySelector1, maxMinibatchSize);
             rightRecordStateBuffer = new MiniBatchJoinBuffer(
-                (KeySelector<RowData, RowData>) stateKeySelector2, maxMinibatchSize);
+                rightType, (KeySelector<RowData, RowData>) stateKeySelector2, maxMinibatchSize);
         }
     }
 
