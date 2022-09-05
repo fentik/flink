@@ -361,7 +361,7 @@ public class ExecutionConfigOptions {
     @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
     public static final ConfigOption<Integer> TABLE_EXEC_MINIBATCH_JOIN_MAX_SIZE = key("table.exec.mini-batch.join.size")
             .intType()
-            .defaultValue(100000)
+            .defaultValue(25000)
             .withDescription(
                     "The maximum number of input records can be buffered for MiniBatch for JOIN operators. "
                             + "MiniBatch is an optimization to buffer input records to reduce state access. "
