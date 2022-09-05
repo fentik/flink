@@ -36,21 +36,32 @@ public class MiniBatchJoinBuffer {
     private final KeySelector<RowData, RowData> keySelector;
     private final InternalTypeInfo<RowData> recordType;
     private final RowDataStringSerializer recordStringSerializer;
+    private final String stateName;
+
+    private boolean isSamplingEnabled;
 
     private long currentBatchCount;
     private long currentEmittedCount;
     private long maxBatchCount;
 
+    private long totalInputRecords;
+    private long totalOutputRecords;
+
     public MiniBatchJoinBuffer(
+            String stateName,
             InternalTypeInfo<RowData> recordType,
             KeySelector<RowData, RowData> keySelector,
             int maxBatchCount) {
         this.maxBatchCount = maxBatchCount;
         this.currentBatchCount = 0;
         this.currentEmittedCount = 0;
+        this.totalInputRecords = 0;
+        this.totalOutputRecords = 0;
+        this.isSamplingEnabled = false;
         this.buffer = new HashMap<>();
         this.keySelector = keySelector;
         this.recordType = recordType;
+        this.stateName = stateName;
         this.recordStringSerializer = new RowDataStringSerializer(recordType);
 
     }
@@ -62,14 +73,17 @@ public class MiniBatchJoinBuffer {
         record.setRowKind(RowKind.INSERT);
         Integer cnt = buffer.get(record);
 
-        LOG.info("MINIBATCH adding record {} cnt {}", recordAsString(input), cnt);
+        if (isSamplingEnabled && currentBatchCount < 2) {
+            // we want to print a sample of input rows of every batch
+            LOG.info("MINIBATCH {} sampling input record {}", stateName, recordAsString(input));
+        }
 
         if (cnt != null) {
             cnt += delta;
         } else {
             cnt = delta;
         }
-        LOG.info("MINIBATCH no unique: cnt {} origkind {}", cnt, origKind);
+
         if (cnt == 0) {
             buffer.remove(record);
         } else {
@@ -84,7 +98,6 @@ public class MiniBatchJoinBuffer {
             RowData record = entry.getKey();
             Integer count = entry.getValue();
             RowKind kind = count < 0 ? RowKind.DELETE : RowKind.INSERT;
-            LOG.debug("MINIBATCH emitter rec {} kind {} count {}", recordAsString(record), kind, count);
             for (count = Math.abs(count); count > 0; count--) {
                 // processor may overwrite kind, so reset it after every call
                 be.setCurrentKey(keySelector.getKey(record));
@@ -99,10 +112,12 @@ public class MiniBatchJoinBuffer {
 
     private void recordAdded(long byteSize) {
         currentBatchCount += 1;
+        totalInputRecords += 1;
     }
 
     private void recordEmitted() {
         currentEmittedCount += 1;
+        totalOutputRecords += 1;
     }
 
     public boolean batchNeedsFlush() {
@@ -114,9 +129,15 @@ public class MiniBatchJoinBuffer {
     }
 
     private void batchProcessed() {
-        if (currentBatchCount > 10) {
-            LOG.info("MINIBATCH emitted {} records out of {} recieved",
-                    currentEmittedCount, currentBatchCount);
+        if (currentBatchCount > 1) {
+            double factor = totalInputRecords == totalOutputRecords
+                ? 0
+                : (totalInputRecords - totalOutputRecords) / (double) totalInputRecords
+                ;
+            LOG.info("MINIBATCH {} emitted {} records out of {} recieved (total {} out and {} in effectiveness ratio {})",
+                    stateName, currentEmittedCount, currentBatchCount,
+                    totalOutputRecords, totalInputRecords,
+                    String.format("%.2f", factor));
         }
         currentBatchCount = 0;
         currentEmittedCount = 0;
