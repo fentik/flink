@@ -140,7 +140,7 @@ public abstract class AbstractStreamOperator<OUT>
      * <p>
      * This is for elements from the first input.
      */
-    private transient KeySelector<?, ?> stateKeySelector1;
+    protected transient KeySelector<?, ?> stateKeySelector1;
 
     /**
      * {@code KeySelector} for extracting a key from an element being processed.
@@ -151,7 +151,7 @@ public abstract class AbstractStreamOperator<OUT>
      * <p>
      * This is for elements from the second input.
      */
-    private transient KeySelector<?, ?> stateKeySelector2;
+    protected transient KeySelector<?, ?> stateKeySelector2;
 
     private transient StreamOperatorStateHandler stateHandler;
 

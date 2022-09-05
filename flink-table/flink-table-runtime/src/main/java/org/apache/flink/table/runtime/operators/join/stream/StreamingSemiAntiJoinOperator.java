@@ -29,6 +29,10 @@ import org.apache.flink.table.runtime.operators.join.stream.state.OuterJoinRecor
 import org.apache.flink.table.runtime.operators.join.stream.state.OuterJoinRecordStateViews;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.types.RowKind;
+import org.apache.flink.streaming.api.watermark.Watermark;
+
+import org.apache.flink.table.runtime.operators.join.stream.minibatch.MiniBatchJoinBuffer;
+import org.apache.flink.api.java.functions.KeySelector;
 
 /** Streaming unbounded Join operator which supports SEMI/ANTI JOIN. */
 public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator {
@@ -37,11 +41,16 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
 
     // true if it is anti join, otherwise is semi joinp
     private final boolean isAntiJoin;
+    private final boolean isMinibatchEnabled;
+    private final int maxMinibatchSize;
 
     // left join state
     private transient OuterJoinRecordStateView leftRecordStateView;
+    private transient MiniBatchJoinBuffer leftRecordStateBuffer;
+
     // right join state
     private transient JoinRecordStateView rightRecordStateView;
+    private transient MiniBatchJoinBuffer rightRecordStateBuffer;
 
     public StreamingSemiAntiJoinOperator(
             boolean isAntiJoin,
@@ -52,7 +61,9 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
             JoinInputSideSpec rightInputSideSpec,
             boolean[] filterNullKeys,
             long stateRetentionTime,
-            boolean batchBackfillEnabled) {
+            boolean batchBackfillEnabled,
+            boolean isMinibatchEnabled,
+            int maxMinibatchSize) {
         super(
                 leftType,
                 rightType,
@@ -63,6 +74,8 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
                 stateRetentionTime,
                 batchBackfillEnabled);
         this.isAntiJoin = isAntiJoin;
+        this.isMinibatchEnabled = isMinibatchEnabled;
+        this.maxMinibatchSize = maxMinibatchSize;
     }
 
     @Override
@@ -85,6 +98,16 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
                         rightInputSideSpec,
                         rightType,
                         stateRetentionTime);
+
+        // initialize minibatch buffer states
+        if (isMinibatchEnabled) {
+            leftRecordStateBuffer = new MiniBatchJoinBuffer(
+                getOperatorName() + " - LEFT input",
+                leftType, (KeySelector<RowData, RowData>) stateKeySelector1, maxMinibatchSize);
+            rightRecordStateBuffer = new MiniBatchJoinBuffer(
+                getOperatorName() + " - RIGHT input",
+                rightType, (KeySelector<RowData, RowData>) stateKeySelector2, maxMinibatchSize);
+        }
     }
 
     @Override
@@ -125,6 +148,17 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
     @Override
     public void processElement1(StreamRecord<RowData> element) throws Exception {
         RowData input = element.getValue();
+        if (isMinibatchEnabled && !isBatchMode()) {
+            leftRecordStateBuffer.addRecordToBatch(input);
+            if (leftRecordStateBuffer.batchNeedsFlush()) {
+                flushRighMinibatch();
+            }
+        } else {
+            processElement1(input);
+        }
+    }
+
+    private void processElement1(RowData input) throws Exception {
         AssociatedRecords associatedRecords =
                 AssociatedRecords.of(input, true, rightRecordStateView, joinCondition);
         if (associatedRecords.isEmpty()) {
@@ -187,6 +221,17 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
     @Override
     public void processElement2(StreamRecord<RowData> element) throws Exception {
         RowData input = element.getValue();
+        if (isMinibatchEnabled && !isBatchMode()) {
+            rightRecordStateBuffer.addRecordToBatch(input);
+            if (rightRecordStateBuffer.batchNeedsFlush()) {
+                flushRighMinibatch();
+            }
+        } else {
+            processElement2(input);
+        }
+    }
+
+    private void processElement2(RowData input) throws Exception {
         boolean isAccumulateMsg = RowDataUtil.isAccumulateMsg(input);
         RowKind inputRowKind = input.getRowKind();
         input.setRowKind(RowKind.INSERT); // erase RowKind for later state updating
@@ -242,5 +287,35 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
                 }
             } // ignore when associated number == 0
         }
+    }
+
+    private void flushLeftMinibatch() throws Exception {
+        leftRecordStateBuffer.processBatch(getKeyedStateBackend(), record -> {
+            processElement1(record);
+        });
+    }
+
+    private void flushRighMinibatch() throws Exception {
+        rightRecordStateBuffer.processBatch(getKeyedStateBackend(), record -> {
+            processElement2(record);
+        });
+    }
+
+    @Override
+    public void processWatermark(Watermark mark) throws Exception {
+        if (!isBatchMode()) {
+            LOG.debug("MINIBATCH WATERMARK in streaming mode {}", mark);
+            flushRighMinibatch();
+            flushLeftMinibatch();
+        }
+        super.processWatermark(mark);
+    }
+
+    @Override
+    public void prepareSnapshotPreBarrier(long checkpointId) throws Exception {
+        LOG.info("MINIBATCH prepareSnapshotPreBarrier");
+        flushRighMinibatch();
+        flushLeftMinibatch();
+        super.prepareSnapshotPreBarrier(checkpointId);
     }
 }
