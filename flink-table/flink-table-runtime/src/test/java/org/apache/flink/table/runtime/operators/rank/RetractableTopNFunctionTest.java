@@ -531,7 +531,8 @@ public class RetractableTopNFunctionTest extends TopNFunctionTestBase {
                         new ConstantRankRange(1, 1),
                         generatedEqualiser,
                         true,
-                        false);
+                        false,
+			false);
 
         OneInputStreamOperatorTestHarness<RowData, RowData> testHarness = createTestHarness(func);
         testHarness.open();
