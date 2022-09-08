@@ -18,24 +18,18 @@
 
 package org.apache.flink.table.runtime.operators.join.stream.state;
 
-import org.apache.flink.util.Collector;
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.runtime.state.KeyedStateBackend;
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.generated.JoinCondition;
+import org.apache.flink.util.Collector;
 
 /**
- * A {@link JoinRecordStateView} is a view to the join state. It encapsulates
- * the join state and
- * provides some APIs facing the input records. The join state is used to store
- * input records. The
- * structure of the join state is vary depending on the
- * {@link JoinInputSideSpec}.
+ * A {@link JoinRecordStateView} is a view to the join state. It encapsulates the join state and
+ * provides some APIs facing the input records. The join state is used to store input records. The
+ * structure of the join state is vary depending on the {@link JoinInputSideSpec}.
  *
- * <p>
- * For example: when the {@link JoinInputSideSpec} is JoinKeyContainsUniqueKey,
- * we will use
- * {@link org.apache.flink.api.common.state.ValueState} to store records which
- * has better
+ * <p>For example: when the {@link JoinInputSideSpec} is JoinKeyContainsUniqueKey, we will use
+ * {@link org.apache.flink.api.common.state.ValueState} to store records which has better
  * performance.
  */
 public interface JoinRecordStateView {
@@ -50,7 +44,12 @@ public interface JoinRecordStateView {
     Iterable<RowData> getRecords() throws Exception;
 
     /** Emit join state */
-    void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-            JoinRecordStateView otherView, JoinCondition condition, boolean leftRowOnly,
-            boolean inputIsLeft) throws Exception;
+    void emitCompleteState(
+            KeyedStateBackend<RowData> be,
+            Collector<RowData> collect,
+            JoinRecordStateView otherView,
+            JoinCondition condition,
+            boolean leftRowOnly,
+            boolean inputIsLeft)
+            throws Exception;
 }

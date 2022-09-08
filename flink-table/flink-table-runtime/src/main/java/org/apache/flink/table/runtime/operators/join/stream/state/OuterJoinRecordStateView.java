@@ -19,8 +19,8 @@
 package org.apache.flink.table.runtime.operators.join.stream.state;
 
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.runtime.state.KeyedStateBackend;
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.generated.JoinCondition;
 import org.apache.flink.util.Collector;
 
@@ -59,7 +59,12 @@ public interface OuterJoinRecordStateView extends JoinRecordStateView {
     Iterable<Tuple2<RowData, Integer>> getRecordsAndNumOfAssociations() throws Exception;
 
     /** Emit anti join state */
-    void emitAntiJoinState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-        JoinRecordStateView otherView, JoinCondition condition, boolean inputRowOnly,
-        boolean inputIsLeft) throws Exception;
+    void emitAntiJoinState(
+            KeyedStateBackend<RowData> be,
+            Collector<RowData> collect,
+            JoinRecordStateView otherView,
+            JoinCondition condition,
+            boolean inputRowOnly,
+            boolean inputIsLeft)
+            throws Exception;
 }

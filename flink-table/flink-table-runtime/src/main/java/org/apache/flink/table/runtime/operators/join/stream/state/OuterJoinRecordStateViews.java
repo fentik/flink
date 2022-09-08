@@ -28,44 +28,37 @@ import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.typeutils.TupleTypeInfo;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
-import org.apache.flink.util.IterableIterator;
-import org.apache.flink.util.Collector;
-import org.apache.flink.runtime.state.VoidNamespace;
-import org.apache.flink.runtime.state.VoidNamespaceSerializer;
 import org.apache.flink.runtime.state.KeyedStateBackend;
 import org.apache.flink.runtime.state.KeyedStateFunction;
-import org.apache.flink.table.runtime.generated.JoinCondition;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.runtime.state.VoidNamespace;
+import org.apache.flink.runtime.state.VoidNamespaceSerializer;
+import org.apache.flink.table.data.GenericRowData;
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.utils.JoinedRowData;
+import org.apache.flink.table.runtime.generated.JoinCondition;
+import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.runtime.util.RowDataStringSerializer;
+import org.apache.flink.types.RowKind;
+import org.apache.flink.util.Collector;
+import org.apache.flink.util.IterableIterator;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import static org.apache.flink.table.runtime.util.StateConfigUtil.createTtlConfig;
 import static org.apache.flink.util.Preconditions.checkNotNull;
-import static org.apache.flink.util.Preconditions.checkArgument;
 
-/**
- * Utility to create a {@link OuterJoinRecordStateViews} depends on
- * {@link JoinInputSideSpec}.
- */
+/** Utility to create a {@link OuterJoinRecordStateViews} depends on {@link JoinInputSideSpec}. */
 public final class OuterJoinRecordStateViews {
 
     private static final Logger LOG = LoggerFactory.getLogger(OuterJoinRecordStateViews.class);
 
-    /**
-     * Creates a {@link OuterJoinRecordStateView} depends on
-     * {@link JoinInputSideSpec}.
-     */
+    /** Creates a {@link OuterJoinRecordStateView} depends on {@link JoinInputSideSpec}. */
     public static OuterJoinRecordStateView create(
             RuntimeContext ctx,
             String stateName,
@@ -94,10 +87,17 @@ public final class OuterJoinRecordStateViews {
         }
     }
 
-    static void processElements(JoinRecordStateView otherView, Collector<RowData> collect,
-            JoinCondition condition, boolean inputIsLeft, JoinedRowData outRow,
-            RowData thisRow, RowData otherNullRow, boolean isAntiJoin,
-            boolean inputRowOnly) throws Exception {
+    static void processElements(
+            JoinRecordStateView otherView,
+            Collector<RowData> collect,
+            JoinCondition condition,
+            boolean inputIsLeft,
+            JoinedRowData outRow,
+            RowData thisRow,
+            RowData otherNullRow,
+            boolean isAntiJoin,
+            boolean inputRowOnly)
+            throws Exception {
 
         int rowsMatched = 0;
 
@@ -119,9 +119,10 @@ public final class OuterJoinRecordStateViews {
                 otherRow = (RowData) recordIter.next();
             }
 
-            boolean matched = inputIsLeft
-                    ? condition.apply(thisRow, otherRow)
-                    : condition.apply(otherRow, thisRow);
+            boolean matched =
+                    inputIsLeft
+                            ? condition.apply(thisRow, otherRow)
+                            : condition.apply(otherRow, thisRow);
 
             if (matched) {
                 rowsMatched++;
@@ -181,9 +182,10 @@ public final class OuterJoinRecordStateViews {
                 InternalTypeInfo<RowData> recordType,
                 InternalTypeInfo<RowData> otherRecordType,
                 StateTtlConfig ttlConfig) {
-            TupleTypeInfo<Tuple2<RowData, Integer>> valueTypeInfo = new TupleTypeInfo<>(recordType, Types.INT);
-            ValueStateDescriptor<Tuple2<RowData, Integer>> recordStateDesc = new ValueStateDescriptor<>(stateName,
-                    valueTypeInfo);
+            TupleTypeInfo<Tuple2<RowData, Integer>> valueTypeInfo =
+                    new TupleTypeInfo<>(recordType, Types.INT);
+            ValueStateDescriptor<Tuple2<RowData, Integer>> recordStateDesc =
+                    new ValueStateDescriptor<>(stateName, valueTypeInfo);
             if (ttlConfig.isEnabled()) {
                 recordStateDesc.enableTimeToLive(ttlConfig);
             }
@@ -241,45 +243,72 @@ public final class OuterJoinRecordStateViews {
             return reusedTupleList;
         }
 
-        private void emitState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-                JoinRecordStateView otherView, JoinCondition condition, boolean isAntiJoin,
-                boolean inputRowOnly, boolean inputIsLeft) throws Exception {
-            TupleTypeInfo<Tuple2<RowData, Integer>> valueTypeInfo = new TupleTypeInfo<>(recordType, Types.INT);
-            ValueStateDescriptor<Tuple2<RowData, Integer>> recordStateDesc = new ValueStateDescriptor<>(stateName,
-                    valueTypeInfo);
+        private void emitState(
+                KeyedStateBackend<RowData> be,
+                Collector<RowData> collect,
+                JoinRecordStateView otherView,
+                JoinCondition condition,
+                boolean isAntiJoin,
+                boolean inputRowOnly,
+                boolean inputIsLeft)
+                throws Exception {
+            TupleTypeInfo<Tuple2<RowData, Integer>> valueTypeInfo =
+                    new TupleTypeInfo<>(recordType, Types.INT);
+            ValueStateDescriptor<Tuple2<RowData, Integer>> recordStateDesc =
+                    new ValueStateDescriptor<>(stateName, valueTypeInfo);
 
             JoinedRowData outRow = new JoinedRowData();
             outRow.setRowKind(RowKind.INSERT);
 
-            be.applyToAllKeys(VoidNamespace.INSTANCE,
+            be.applyToAllKeys(
+                    VoidNamespace.INSTANCE,
                     VoidNamespaceSerializer.INSTANCE,
                     recordStateDesc,
                     new KeyedStateFunction<RowData, ValueState<Tuple2<RowData, Integer>>>() {
                         @Override
-                        public void process(RowData key, ValueState<Tuple2<RowData, Integer>> state) throws Exception {
+                        public void process(RowData key, ValueState<Tuple2<RowData, Integer>> state)
+                                throws Exception {
                             Tuple2<RowData, Integer> record = state.value();
                             RowData thisRow = record.f0;
 
                             // set current key context for otherView fetch
                             be.setCurrentKey(key);
 
-                            processElements(otherView, collect, condition, inputIsLeft, outRow,
-                                    thisRow, otherNullRow, isAntiJoin, inputRowOnly);
+                            processElements(
+                                    otherView,
+                                    collect,
+                                    condition,
+                                    inputIsLeft,
+                                    outRow,
+                                    thisRow,
+                                    otherNullRow,
+                                    isAntiJoin,
+                                    inputRowOnly);
                         }
                     });
         }
 
         @Override
-        public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-                JoinRecordStateView otherView, JoinCondition condition, boolean inputRowOnly,
-                boolean inputIsLeft) throws Exception {
+        public void emitCompleteState(
+                KeyedStateBackend<RowData> be,
+                Collector<RowData> collect,
+                JoinRecordStateView otherView,
+                JoinCondition condition,
+                boolean inputRowOnly,
+                boolean inputIsLeft)
+                throws Exception {
             emitState(be, collect, otherView, condition, false, inputRowOnly, inputIsLeft);
         }
 
         @Override
-        public void emitAntiJoinState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-                JoinRecordStateView otherView, JoinCondition condition, boolean inputRowOnly,
-                boolean inputIsLeft) throws Exception {
+        public void emitAntiJoinState(
+                KeyedStateBackend<RowData> be,
+                Collector<RowData> collect,
+                JoinRecordStateView otherView,
+                JoinCondition condition,
+                boolean inputRowOnly,
+                boolean inputIsLeft)
+                throws Exception {
             emitState(be, collect, otherView, condition, true, inputRowOnly, inputIsLeft);
         }
     }
@@ -306,9 +335,10 @@ public final class OuterJoinRecordStateViews {
                 StateTtlConfig ttlConfig) {
             checkNotNull(uniqueKeyType);
             checkNotNull(uniqueKeySelector);
-            TupleTypeInfo<Tuple2<RowData, Integer>> valueTypeInfo = new TupleTypeInfo<>(recordType, Types.INT);
-            MapStateDescriptor<RowData, Tuple2<RowData, Integer>> recordStateDesc = new MapStateDescriptor<>(stateName,
-                    uniqueKeyType, valueTypeInfo);
+            TupleTypeInfo<Tuple2<RowData, Integer>> valueTypeInfo =
+                    new TupleTypeInfo<>(recordType, Types.INT);
+            MapStateDescriptor<RowData, Tuple2<RowData, Integer>> recordStateDesc =
+                    new MapStateDescriptor<>(stateName, uniqueKeyType, valueTypeInfo);
             if (ttlConfig.isEnabled()) {
                 recordStateDesc.enableTimeToLive(ttlConfig);
             }
@@ -357,46 +387,74 @@ public final class OuterJoinRecordStateViews {
             return recordState.values();
         }
 
-        private void emitState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-                JoinRecordStateView otherView, JoinCondition condition, boolean isAntiJoin, boolean inputRowOnly,
-                boolean inputIsLeft) throws Exception {
-            TupleTypeInfo<Tuple2<RowData, Integer>> valueTypeInfo = new TupleTypeInfo<>(recordType, Types.INT);
-            MapStateDescriptor<RowData, Tuple2<RowData, Integer>> recordStateDesc = new MapStateDescriptor<>(stateName,
-                    uniqueKeyType, valueTypeInfo);
+        private void emitState(
+                KeyedStateBackend<RowData> be,
+                Collector<RowData> collect,
+                JoinRecordStateView otherView,
+                JoinCondition condition,
+                boolean isAntiJoin,
+                boolean inputRowOnly,
+                boolean inputIsLeft)
+                throws Exception {
+            TupleTypeInfo<Tuple2<RowData, Integer>> valueTypeInfo =
+                    new TupleTypeInfo<>(recordType, Types.INT);
+            MapStateDescriptor<RowData, Tuple2<RowData, Integer>> recordStateDesc =
+                    new MapStateDescriptor<>(stateName, uniqueKeyType, valueTypeInfo);
 
             JoinedRowData outRow = new JoinedRowData();
             outRow.setRowKind(RowKind.INSERT);
 
-            be.applyToAllKeys(VoidNamespace.INSTANCE,
+            be.applyToAllKeys(
+                    VoidNamespace.INSTANCE,
                     VoidNamespaceSerializer.INSTANCE,
                     recordStateDesc,
                     new KeyedStateFunction<RowData, MapState<RowData, Tuple2<RowData, Integer>>>() {
                         @Override
-                        public void process(RowData key, MapState<RowData, Tuple2<RowData, Integer>> state)
+                        public void process(
+                                RowData key, MapState<RowData, Tuple2<RowData, Integer>> state)
                                 throws Exception {
                             // set current key context for otherView fetch
                             be.setCurrentKey(key);
 
-                            for (Map.Entry<RowData, Tuple2<RowData, Integer>> entry : state.entries()) {
+                            for (Map.Entry<RowData, Tuple2<RowData, Integer>> entry :
+                                    state.entries()) {
                                 RowData thisRow = entry.getValue().f0;
-                                processElements(otherView, collect, condition, inputIsLeft, outRow,
-                                        thisRow, otherNullRow, isAntiJoin, inputRowOnly);
+                                processElements(
+                                        otherView,
+                                        collect,
+                                        condition,
+                                        inputIsLeft,
+                                        outRow,
+                                        thisRow,
+                                        otherNullRow,
+                                        isAntiJoin,
+                                        inputRowOnly);
                             }
                         }
                     });
         }
 
         @Override
-        public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-                JoinRecordStateView otherView, JoinCondition condition, boolean inputRowOnly,
-                boolean inputIsLeft) throws Exception {
+        public void emitCompleteState(
+                KeyedStateBackend<RowData> be,
+                Collector<RowData> collect,
+                JoinRecordStateView otherView,
+                JoinCondition condition,
+                boolean inputRowOnly,
+                boolean inputIsLeft)
+                throws Exception {
             emitState(be, collect, otherView, condition, false, inputRowOnly, inputIsLeft);
         }
 
         @Override
-        public void emitAntiJoinState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-                JoinRecordStateView otherView, JoinCondition condition, boolean inputRowOnly,
-                boolean inputIsLeft) throws Exception {
+        public void emitAntiJoinState(
+                KeyedStateBackend<RowData> be,
+                Collector<RowData> collect,
+                JoinRecordStateView otherView,
+                JoinCondition condition,
+                boolean inputRowOnly,
+                boolean inputIsLeft)
+                throws Exception {
             emitState(be, collect, otherView, condition, true, inputRowOnly, inputIsLeft);
         }
     }
@@ -417,9 +475,10 @@ public final class OuterJoinRecordStateViews {
                 InternalTypeInfo<RowData> recordType,
                 InternalTypeInfo<RowData> otherRecordType,
                 StateTtlConfig ttlConfig) {
-            TupleTypeInfo<Tuple2<Integer, Integer>> tupleTypeInfo = new TupleTypeInfo<>(Types.INT, Types.INT);
-            MapStateDescriptor<RowData, Tuple2<Integer, Integer>> recordStateDesc = new MapStateDescriptor<>(stateName,
-                    recordType, tupleTypeInfo);
+            TupleTypeInfo<Tuple2<Integer, Integer>> tupleTypeInfo =
+                    new TupleTypeInfo<>(Types.INT, Types.INT);
+            MapStateDescriptor<RowData, Tuple2<Integer, Integer>> recordStateDesc =
+                    new MapStateDescriptor<>(stateName, recordType, tupleTypeInfo);
             if (ttlConfig.isEnabled()) {
                 recordStateDesc.enableTimeToLive(ttlConfig);
             }
@@ -484,8 +543,8 @@ public final class OuterJoinRecordStateViews {
                 throws Exception {
             return new IterableIterator<Tuple2<RowData, Integer>>() {
 
-                private final Iterator<Map.Entry<RowData, Tuple2<Integer, Integer>>> backingIterable = recordState
-                        .entries().iterator();
+                private final Iterator<Map.Entry<RowData, Tuple2<Integer, Integer>>>
+                        backingIterable = recordState.entries().iterator();
                 private Tuple2<RowData, Integer> tuple;
                 private int remainingTimes = 0;
 
@@ -515,47 +574,74 @@ public final class OuterJoinRecordStateViews {
             };
         }
 
-        private void emitState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-                JoinRecordStateView otherView, JoinCondition condition, boolean isAntiJoin,
-                boolean inputRowOnly, boolean inputIsLeft) throws Exception {
-            TupleTypeInfo<Tuple2<Integer, Integer>> tupleTypeInfo = new TupleTypeInfo<>(Types.INT, Types.INT);
-            MapStateDescriptor<RowData, Tuple2<Integer, Integer>> recordStateDesc = new MapStateDescriptor<>(stateName,
-                    recordType, tupleTypeInfo);
+        private void emitState(
+                KeyedStateBackend<RowData> be,
+                Collector<RowData> collect,
+                JoinRecordStateView otherView,
+                JoinCondition condition,
+                boolean isAntiJoin,
+                boolean inputRowOnly,
+                boolean inputIsLeft)
+                throws Exception {
+            TupleTypeInfo<Tuple2<Integer, Integer>> tupleTypeInfo =
+                    new TupleTypeInfo<>(Types.INT, Types.INT);
+            MapStateDescriptor<RowData, Tuple2<Integer, Integer>> recordStateDesc =
+                    new MapStateDescriptor<>(stateName, recordType, tupleTypeInfo);
 
             JoinedRowData outRow = new JoinedRowData();
             outRow.setRowKind(RowKind.INSERT);
 
-            be.applyToAllKeys(VoidNamespace.INSTANCE,
+            be.applyToAllKeys(
+                    VoidNamespace.INSTANCE,
                     VoidNamespaceSerializer.INSTANCE,
                     recordStateDesc,
                     new KeyedStateFunction<RowData, MapState<RowData, Tuple2<Integer, Integer>>>() {
                         @Override
-                        public void process(RowData key, MapState<RowData, Tuple2<Integer, Integer>> state)
+                        public void process(
+                                RowData key, MapState<RowData, Tuple2<Integer, Integer>> state)
                                 throws Exception {
                             // set current key context for otherView fetch
                             be.setCurrentKey(key);
 
-                            for (Map.Entry<RowData, Tuple2<Integer, Integer>> entry : state.entries()) {
+                            for (Map.Entry<RowData, Tuple2<Integer, Integer>> entry :
+                                    state.entries()) {
                                 RowData thisRow = entry.getKey();
-                                processElements(otherView, collect, condition, inputIsLeft, outRow,
-                                        thisRow, otherNullRow, isAntiJoin, inputRowOnly);
+                                processElements(
+                                        otherView,
+                                        collect,
+                                        condition,
+                                        inputIsLeft,
+                                        outRow,
+                                        thisRow,
+                                        otherNullRow,
+                                        isAntiJoin,
+                                        inputRowOnly);
                             }
                         }
                     });
-
         }
 
         @Override
-        public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-                JoinRecordStateView otherView, JoinCondition condition, boolean inputRowOnly,
-                boolean inputIsLeft) throws Exception {
+        public void emitCompleteState(
+                KeyedStateBackend<RowData> be,
+                Collector<RowData> collect,
+                JoinRecordStateView otherView,
+                JoinCondition condition,
+                boolean inputRowOnly,
+                boolean inputIsLeft)
+                throws Exception {
             emitState(be, collect, otherView, condition, false, inputRowOnly, inputIsLeft);
         }
 
         @Override
-        public void emitAntiJoinState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-                JoinRecordStateView otherView, JoinCondition condition, boolean inputRowOnly,
-                boolean inputIsLeft) throws Exception {
+        public void emitAntiJoinState(
+                KeyedStateBackend<RowData> be,
+                Collector<RowData> collect,
+                JoinRecordStateView otherView,
+                JoinCondition condition,
+                boolean inputRowOnly,
+                boolean inputIsLeft)
+                throws Exception {
             emitState(be, collect, otherView, condition, true, inputRowOnly, inputIsLeft);
         }
     }

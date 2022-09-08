@@ -18,10 +18,11 @@
 
 package org.apache.flink.table.runtime.operators.join.stream;
 
+import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.Meter;
 import org.apache.flink.metrics.MeterView;
-
+import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
@@ -35,14 +36,10 @@ import org.apache.flink.table.runtime.operators.join.stream.state.JoinRecordStat
 import org.apache.flink.table.runtime.operators.join.stream.state.OuterJoinRecordStateView;
 import org.apache.flink.table.runtime.operators.join.stream.state.OuterJoinRecordStateViews;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
-import org.apache.flink.types.RowKind;
 import org.apache.flink.table.runtime.util.RowDataStringSerializer;
-import org.apache.flink.streaming.api.watermark.Watermark;
-import org.apache.flink.runtime.state.KeyedStateBackend;
-import org.apache.flink.api.java.functions.KeySelector;
-/**
- * Streaming unbounded Join operator which supports INNER/LEFT/RIGHT/FULL JOIN.
- */
+import org.apache.flink.types.RowKind;
+
+/** Streaming unbounded Join operator which supports INNER/LEFT/RIGHT/FULL JOIN. */
 public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
 
     private static final long serialVersionUID = -376944622236540545L;
@@ -113,57 +110,76 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         this.leftNullRow = new GenericRowData(leftType.toRowSize());
         this.rightNullRow = new GenericRowData(rightType.toRowSize());
 
-        this.associatedRecordsCallCount = getRuntimeContext().getMetricGroup().counter("associated_records_call_count");
-        this.associatedRecordsCallRate = getRuntimeContext().getMetricGroup().meter("associated_records_call_rate",
-                new MeterView(this.associatedRecordsCallCount));
-        this.associatedRecordsSizeSum = getRuntimeContext().getMetricGroup().counter("associated_records_size_sum");
-        this.associatedRecordsSizeSumRate = getRuntimeContext().getMetricGroup().meter(
-                "associated_records_size_sum_rate",
-                new MeterView(this.associatedRecordsSizeSum));
+        this.associatedRecordsCallCount =
+                getRuntimeContext().getMetricGroup().counter("associated_records_call_count");
+        this.associatedRecordsCallRate =
+                getRuntimeContext()
+                        .getMetricGroup()
+                        .meter(
+                                "associated_records_call_rate",
+                                new MeterView(this.associatedRecordsCallCount));
+        this.associatedRecordsSizeSum =
+                getRuntimeContext().getMetricGroup().counter("associated_records_size_sum");
+        this.associatedRecordsSizeSumRate =
+                getRuntimeContext()
+                        .getMetricGroup()
+                        .meter(
+                                "associated_records_size_sum_rate",
+                                new MeterView(this.associatedRecordsSizeSum));
 
         // initialize states
         if (leftIsOuter) {
-            this.leftRecordStateView = OuterJoinRecordStateViews.create(
-                    getRuntimeContext(),
-                    "left-records",
-                    leftInputSideSpec,
-                    leftType,
-                    rightType,
-                    stateRetentionTime);
+            this.leftRecordStateView =
+                    OuterJoinRecordStateViews.create(
+                            getRuntimeContext(),
+                            "left-records",
+                            leftInputSideSpec,
+                            leftType,
+                            rightType,
+                            stateRetentionTime);
         } else {
-            this.leftRecordStateView = JoinRecordStateViews.create(
-                    getRuntimeContext(),
-                    "left-records",
-                    leftInputSideSpec,
-                    leftType,
-                    stateRetentionTime);
+            this.leftRecordStateView =
+                    JoinRecordStateViews.create(
+                            getRuntimeContext(),
+                            "left-records",
+                            leftInputSideSpec,
+                            leftType,
+                            stateRetentionTime);
         }
 
         if (rightIsOuter) {
-            this.rightRecordStateView = OuterJoinRecordStateViews.create(
-                    getRuntimeContext(),
-                    "right-records",
-                    rightInputSideSpec,
-                    rightType,
-                    leftType,
-                    stateRetentionTime);
+            this.rightRecordStateView =
+                    OuterJoinRecordStateViews.create(
+                            getRuntimeContext(),
+                            "right-records",
+                            rightInputSideSpec,
+                            rightType,
+                            leftType,
+                            stateRetentionTime);
         } else {
-            this.rightRecordStateView = JoinRecordStateViews.create(
-                    getRuntimeContext(),
-                    "right-records",
-                    rightInputSideSpec,
-                    rightType,
-                    stateRetentionTime);
+            this.rightRecordStateView =
+                    JoinRecordStateViews.create(
+                            getRuntimeContext(),
+                            "right-records",
+                            rightInputSideSpec,
+                            rightType,
+                            stateRetentionTime);
         }
 
         // initialize minibatch buffer states
         if (isMinibatchEnabled) {
-            leftRecordStateBuffer = new MiniBatchJoinBuffer(
-                getOperatorName() + " - LEFT input",
-                leftType, (KeySelector<RowData, RowData>) stateKeySelector1, maxMinibatchSize);
-            rightRecordStateBuffer = new MiniBatchJoinBuffer(
-                getOperatorName() + " - RIGHT input",
-                rightType, (KeySelector<RowData, RowData>) stateKeySelector2, maxMinibatchSize);
+            leftRecordStateBuffer =
+                    new MiniBatchJoinBuffer(
+                            getOperatorName() + " - LEFT input",
+                            leftType,
+                            (KeySelector<RowData, RowData>) stateKeySelector1,
+                            maxMinibatchSize);
+            rightRecordStateBuffer =
+                    new MiniBatchJoinBuffer(
+                            getOperatorName() + " - RIGHT input",
+                            rightType,
+                            (KeySelector<RowData, RowData>) stateKeySelector2,
+                            maxMinibatchSize);
         }
     }
 
@@ -172,7 +188,8 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         if (isMinibatchEnabled && !isBatchMode()) {
             RowData input = element.getValue();
             // RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(leftType);
-            // LOG.debug("MINIBATCH element 1 (left) input {} kind {} key {}", rowStringSerializer.asString(input),
+            // LOG.debug("MINIBATCH element 1 (left) input {} kind {} key {}",
+            // rowStringSerializer.asString(input),
             //         input.getRowKind(), getCurrentKey());
             leftRecordStateBuffer.addRecordToBatch(input);
             if (leftRecordStateBuffer.batchNeedsFlush()) {
@@ -188,7 +205,8 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         if (isMinibatchEnabled && !isBatchMode()) {
             RowData input = element.getValue();
             // RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(rightType);
-            // LOG.debug("MINIBATCH element 2 (right) input {} kind {} key {}", rowStringSerializer.asString(input),
+            // LOG.debug("MINIBATCH element 2 (right) input {} kind {} key {}",
+            // rowStringSerializer.asString(input),
             //         input.getRowKind(), getCurrentKey());
             rightRecordStateBuffer.addRecordToBatch(input);
             if (rightRecordStateBuffer.batchNeedsFlush()) {
@@ -200,15 +218,19 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
     }
 
     private void flushLeftMinibatch() throws Exception {
-        leftRecordStateBuffer.processBatch(getKeyedStateBackend(), record -> {
-            processElement(record, leftRecordStateView, rightRecordStateView, true);
-        });
+        leftRecordStateBuffer.processBatch(
+                getKeyedStateBackend(),
+                record -> {
+                    processElement(record, leftRecordStateView, rightRecordStateView, true);
+                });
     }
 
     private void flushRighMinibatch() throws Exception {
-        rightRecordStateBuffer.processBatch(getKeyedStateBackend(), record -> {
-            processElement(record, rightRecordStateView, leftRecordStateView, false);
-        });
+        rightRecordStateBuffer.processBatch(
+                getKeyedStateBackend(),
+                record -> {
+                    processElement(record, rightRecordStateView, leftRecordStateView, false);
+                });
     }
 
     @Override
@@ -238,53 +260,64 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
     protected void emitStateAndSwitchToStreaming() throws Exception {
         LOG.info("{} emit and switch to streaming", getPrintableName());
         if (leftIsOuter) {
-            leftRecordStateView.emitCompleteState(getKeyedStateBackend(), this.collector,
-                    rightRecordStateView, joinCondition, false, true /* inputIsLeft */);
+            leftRecordStateView.emitCompleteState(
+                    getKeyedStateBackend(),
+                    this.collector,
+                    rightRecordStateView,
+                    joinCondition,
+                    false,
+                    true /* inputIsLeft */);
             if (rightIsOuter) {
                 // FULL JOIN condition, we want to emit the following
                 // leftState -> emitComplete
                 // rightState -> emitAntiJoin (everything in right that doesn't match left)
 
-                OuterJoinRecordStateView rightView = (OuterJoinRecordStateView) rightRecordStateView;
-                rightView.emitAntiJoinState(getKeyedStateBackend(), this.collector,
-                        leftRecordStateView, joinCondition, false, false /* inputIsLeft */);
+                OuterJoinRecordStateView rightView =
+                        (OuterJoinRecordStateView) rightRecordStateView;
+                rightView.emitAntiJoinState(
+                        getKeyedStateBackend(),
+                        this.collector,
+                        leftRecordStateView,
+                        joinCondition,
+                        false,
+                        false /* inputIsLeft */);
             }
         } else if (rightIsOuter) {
             // RIGHT OUTER JOIN
-            rightRecordStateView.emitCompleteState(getKeyedStateBackend(), this.collector,
-                    leftRecordStateView, joinCondition, false, false /* inputIsLeft */);
+            rightRecordStateView.emitCompleteState(
+                    getKeyedStateBackend(),
+                    this.collector,
+                    leftRecordStateView,
+                    joinCondition,
+                    false,
+                    false /* inputIsLeft */);
         } else {
             // standard inner join
-            leftRecordStateView.emitCompleteState(getKeyedStateBackend(), this.collector,
-                    rightRecordStateView, joinCondition, false, true /* inputIsLeft */);
+            leftRecordStateView.emitCompleteState(
+                    getKeyedStateBackend(),
+                    this.collector,
+                    rightRecordStateView,
+                    joinCondition,
+                    false,
+                    true /* inputIsLeft */);
         }
 
         setStreamMode(true);
     }
 
     /**
-     * Process an input element and output incremental joined records, retraction
-     * messages will be
+     * Process an input element and output incremental joined records, retraction messages will be
      * sent in some scenarios.
      *
-     * <p>
-     * Following is the pseudo code to describe the core logic of this method. The
-     * logic of this
-     * method is too complex, so we provide the pseudo code to help understand the
-     * logic. We should
+     * <p>Following is the pseudo code to describe the core logic of this method. The logic of this
+     * method is too complex, so we provide the pseudo code to help understand the logic. We should
      * keep sync the following pseudo code with the real logic of the method.
      *
-     * <p>
-     * Note: "+I" represents "INSERT", "-D" represents "DELETE", "+U" represents
-     * "UPDATE_AFTER",
-     * "-U" represents "UPDATE_BEFORE". We forward input RowKind if it is inner
-     * join, otherwise, we
-     * always send insert and delete for simplification. We can optimize this to
-     * send -U & +U
-     * instead of D & I in the future (see FLINK-17337). They are equivalent in this
-     * join case. It
-     * may need some refactoring if we want to send -U & +U, so we still keep -D &
-     * +I for now for
+     * <p>Note: "+I" represents "INSERT", "-D" represents "DELETE", "+U" represents "UPDATE_AFTER",
+     * "-U" represents "UPDATE_BEFORE". We forward input RowKind if it is inner join, otherwise, we
+     * always send insert and delete for simplification. We can optimize this to send -U & +U
+     * instead of D & I in the future (see FLINK-17337). They are equivalent in this join case. It
+     * may need some refactoring if we want to send -U & +U, so we still keep -D & +I for now for
      * simplification. See {@code
      * FlinkChangelogModeInferenceProgram.SatisfyModifyKindSetTraitVisitor}.
      *
@@ -333,10 +366,10 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
      * endif
      * </pre>
      *
-     * @param input              the input element
+     * @param input the input element
      * @param inputSideStateView state of input side
      * @param otherSideStateView state of other side
-     * @param inputIsLeft        whether input side is left side
+     * @param inputIsLeft whether input side is left side
      */
     private void processElement(
             RowData input,
@@ -352,18 +385,26 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
 
         // Pass in leftType, rightType, OperatorName, which are used to log expensive
         // joins.
-        AssociatedRecords associatedRecords = AssociatedRecords.of(input, inputIsLeft, this.leftType, this.rightType,
-                getOperatorName(), otherSideStateView, joinCondition);
+        AssociatedRecords associatedRecords =
+                AssociatedRecords.of(
+                        input,
+                        inputIsLeft,
+                        this.leftType,
+                        this.rightType,
+                        getOperatorName(),
+                        otherSideStateView,
+                        joinCondition);
         this.associatedRecordsSizeSum.inc(associatedRecords.size());
         this.associatedRecordsCallCount.inc();
         if (this.shouldLogInput()) {
-            RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(
-                    inputIsLeft ? leftType : rightType);
+            RowDataStringSerializer rowStringSerializer =
+                    new RowDataStringSerializer(inputIsLeft ? leftType : rightType);
             LOG.info("Processing input row: " + rowStringSerializer.asString(input));
         }
         if (isAccumulateMsg) { // record is accumulate
             if (inputIsOuter) { // input side is outer
-                OuterJoinRecordStateView inputSideOuterStateView = (OuterJoinRecordStateView) inputSideStateView;
+                OuterJoinRecordStateView inputSideOuterStateView =
+                        (OuterJoinRecordStateView) inputSideStateView;
                 if (associatedRecords.isEmpty()) { // there is no matched rows on the other side
                     // send +I[record+null]
                     outRow.setRowKind(RowKind.INSERT);
@@ -372,7 +413,8 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                     inputSideOuterStateView.addRecord(input, 0);
                 } else { // there are matched rows on the other side
                     if (otherIsOuter) { // other side is outer
-                        OuterJoinRecordStateView otherSideOuterStateView = (OuterJoinRecordStateView) otherSideStateView;
+                        OuterJoinRecordStateView otherSideOuterStateView =
+                                (OuterJoinRecordStateView) otherSideStateView;
                         for (OuterRecord outerRecord : associatedRecords.getOuterRecords()) {
                             RowData other = outerRecord.record;
                             // if the matched num in the matched rows == 0
@@ -381,7 +423,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                                 outRow.setRowKind(RowKind.DELETE);
                                 outputNullPadding(other, !inputIsLeft);
                             } // ignore matched number > 0
-                              // otherState.update(other, old + 1)
+                            // otherState.update(other, old + 1)
                             otherSideOuterStateView.updateNumOfAssociations(
                                     other, outerRecord.numOfAssociations + 1);
                         }
@@ -403,9 +445,11 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                 inputSideStateView.addRecord(input);
                 if (!associatedRecords.isEmpty()) { // if there are matched rows on the other side
                     if (otherIsOuter) { // if other side is outer
-                        OuterJoinRecordStateView otherSideOuterStateView = (OuterJoinRecordStateView) otherSideStateView;
+                        OuterJoinRecordStateView otherSideOuterStateView =
+                                (OuterJoinRecordStateView) otherSideStateView;
                         for (OuterRecord outerRecord : associatedRecords.getOuterRecords()) {
-                            if (outerRecord.numOfAssociations == 0) { // if the matched num in the matched rows == 0
+                            if (outerRecord.numOfAssociations
+                                    == 0) { // if the matched num in the matched rows == 0
                                 // send -D[null+other]
                                 outRow.setRowKind(RowKind.DELETE);
                                 outputNullPadding(outerRecord.record, !inputIsLeft);
@@ -457,14 +501,15 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                 }
                 // if other side is outer
                 if (otherIsOuter) {
-                    OuterJoinRecordStateView otherSideOuterStateView = (OuterJoinRecordStateView) otherSideStateView;
+                    OuterJoinRecordStateView otherSideOuterStateView =
+                            (OuterJoinRecordStateView) otherSideStateView;
                     for (OuterRecord outerRecord : associatedRecords.getOuterRecords()) {
                         if (outerRecord.numOfAssociations == 1) {
                             // send +I[null+other]
                             outRow.setRowKind(RowKind.INSERT);
                             outputNullPadding(outerRecord.record, !inputIsLeft);
                         } // nothing else to do when number of associations > 1
-                          // otherState.update(other, old - 1)
+                        // otherState.update(other, old - 1)
                         otherSideOuterStateView.updateNumOfAssociations(
                                 outerRecord.record, outerRecord.numOfAssociations - 1);
                     }

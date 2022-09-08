@@ -1,28 +1,20 @@
 package org.apache.flink.table.runtime.operators.join.stream.minibatch;
 
-import java.util.Map;
-import java.util.HashMap;
-
-import org.apache.flink.api.common.functions.RuntimeContext;
-import org.apache.flink.api.common.state.MapState;
-import org.apache.flink.api.common.state.MapStateDescriptor;
-import org.apache.flink.api.common.typeinfo.Types;
+import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.runtime.state.KeyedStateBackend;
-import org.apache.flink.runtime.state.KeyedStateFunction;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.runtime.state.VoidNamespace;
-import org.apache.flink.runtime.state.VoidNamespaceSerializer;
+import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.util.RowDataUtil;
 import org.apache.flink.table.runtime.operators.join.stream.state.JoinBatchProcessor;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
-import org.apache.flink.types.RowKind;
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.table.runtime.util.RowDataStringSerializer;
-
+import org.apache.flink.types.RowKind;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.HashMap;
+import java.util.Map;
 
 public class MiniBatchJoinBuffer {
     private static final Logger LOG = LoggerFactory.getLogger(MiniBatchJoinBuffer.class);
@@ -63,7 +55,6 @@ public class MiniBatchJoinBuffer {
         this.recordType = recordType;
         this.stateName = stateName;
         this.recordStringSerializer = new RowDataStringSerializer(recordType);
-
     }
 
     public void addRecordToBatch(RowData input) throws Exception {
@@ -93,7 +84,8 @@ public class MiniBatchJoinBuffer {
         recordAdded(record.getSizeInBytes());
     }
 
-    public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor processor) throws Exception {
+    public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor processor)
+            throws Exception {
         for (Map.Entry<RowData, Integer> entry : buffer.entrySet()) {
             RowData record = entry.getKey();
             Integer count = entry.getValue();
@@ -130,13 +122,17 @@ public class MiniBatchJoinBuffer {
 
     private void batchProcessed() {
         if (currentBatchCount > 1) {
-            double factor = totalInputRecords == totalOutputRecords
-                ? 0
-                : (totalInputRecords - totalOutputRecords) / (double) totalInputRecords
-                ;
-            LOG.info("MINIBATCH {} emitted {} records out of {} recieved (total {} out and {} in effectiveness ratio {})",
-                    stateName, currentEmittedCount, currentBatchCount,
-                    totalOutputRecords, totalInputRecords,
+            double factor =
+                    totalInputRecords == totalOutputRecords
+                            ? 0
+                            : (totalInputRecords - totalOutputRecords) / (double) totalInputRecords;
+            LOG.info(
+                    "MINIBATCH {} emitted {} records out of {} recieved (total {} out and {} in effectiveness ratio {})",
+                    stateName,
+                    currentEmittedCount,
+                    currentBatchCount,
+                    totalOutputRecords,
+                    totalInputRecords,
                     String.format("%.2f", factor));
         }
         currentBatchCount = 0;

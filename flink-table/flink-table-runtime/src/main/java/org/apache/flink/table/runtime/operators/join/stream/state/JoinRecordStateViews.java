@@ -26,41 +26,35 @@ import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.api.java.functions.KeySelector;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
-import org.apache.flink.util.IterableIterator;
-import org.apache.flink.util.Collector;
-import org.apache.flink.runtime.state.VoidNamespace;
-import org.apache.flink.runtime.state.VoidNamespaceSerializer;
 import org.apache.flink.runtime.state.KeyedStateBackend;
 import org.apache.flink.runtime.state.KeyedStateFunction;
-import org.apache.flink.table.runtime.generated.JoinCondition;
+import org.apache.flink.runtime.state.VoidNamespace;
+import org.apache.flink.runtime.state.VoidNamespaceSerializer;
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.utils.JoinedRowData;
+import org.apache.flink.table.runtime.generated.JoinCondition;
+import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.types.RowKind;
-import org.apache.flink.table.data.util.RowDataUtil;
+import org.apache.flink.util.Collector;
+import org.apache.flink.util.IterableIterator;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import static org.apache.flink.table.runtime.util.StateConfigUtil.createTtlConfig;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
-/**
- * Utility to create a {@link JoinRecordStateView} depends on
- * {@link JoinInputSideSpec}.
- */
+/** Utility to create a {@link JoinRecordStateView} depends on {@link JoinInputSideSpec}. */
 public final class JoinRecordStateViews {
 
     private static final Logger LOG = LoggerFactory.getLogger(JoinRecordStateViews.class);
 
-    /**
-     * Creates a {@link JoinRecordStateView} depends on {@link JoinInputSideSpec}.
-     */
+    /** Creates a {@link JoinRecordStateView} depends on {@link JoinInputSideSpec}. */
     public static JoinRecordStateView create(
             RuntimeContext ctx,
             String stateName,
@@ -99,7 +93,8 @@ public final class JoinRecordStateViews {
                 String stateName,
                 InternalTypeInfo<RowData> recordType,
                 StateTtlConfig ttlConfig) {
-            ValueStateDescriptor<RowData> recordStateDesc = new ValueStateDescriptor<>(stateName, recordType);
+            ValueStateDescriptor<RowData> recordStateDesc =
+                    new ValueStateDescriptor<>(stateName, recordType);
             if (ttlConfig.isEnabled()) {
                 recordStateDesc.enableTimeToLive(ttlConfig);
             }
@@ -131,25 +126,37 @@ public final class JoinRecordStateViews {
         }
 
         @Override
-        public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-                JoinRecordStateView otherView, JoinCondition condition, boolean leftRowOnly,
-                boolean inputIsLeft) throws Exception {
+        public void emitCompleteState(
+                KeyedStateBackend<RowData> be,
+                Collector<RowData> collect,
+                JoinRecordStateView otherView,
+                JoinCondition condition,
+                boolean leftRowOnly,
+                boolean inputIsLeft)
+                throws Exception {
             emitCompleteState(be, collect, otherView, condition);
         }
 
-        private void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-                JoinRecordStateView otherView, JoinCondition condition) throws Exception {
-            ValueStateDescriptor<RowData> recordStateDesc = new ValueStateDescriptor<>(stateName, recordType);
+        private void emitCompleteState(
+                KeyedStateBackend<RowData> be,
+                Collector<RowData> collect,
+                JoinRecordStateView otherView,
+                JoinCondition condition)
+                throws Exception {
+            ValueStateDescriptor<RowData> recordStateDesc =
+                    new ValueStateDescriptor<>(stateName, recordType);
 
             JoinedRowData outRow = new JoinedRowData();
             outRow.setRowKind(RowKind.INSERT);
 
-            be.applyToAllKeys(VoidNamespace.INSTANCE,
+            be.applyToAllKeys(
+                    VoidNamespace.INSTANCE,
                     VoidNamespaceSerializer.INSTANCE,
                     recordStateDesc,
                     new KeyedStateFunction<RowData, ValueState<RowData>>() {
                         @Override
-                        public void process(RowData key, ValueState<RowData> state) throws Exception {
+                        public void process(RowData key, ValueState<RowData> state)
+                                throws Exception {
                             RowData thisRow = state.value();
 
                             // set current key context for otherView fetch
@@ -190,11 +197,10 @@ public final class JoinRecordStateViews {
                 StateTtlConfig ttlConfig) {
             checkNotNull(uniqueKeyType);
             checkNotNull(uniqueKeySelector);
-            MapStateDescriptor<RowData, RowData> recordStateDesc = new MapStateDescriptor<>(stateName, uniqueKeyType,
-                    recordType);
-            MapStateDescriptor<RowData, RowData> bufferStateDesc = new MapStateDescriptor<>(stateName + "-buffer",
-                    uniqueKeyType,
-                    recordType);
+            MapStateDescriptor<RowData, RowData> recordStateDesc =
+                    new MapStateDescriptor<>(stateName, uniqueKeyType, recordType);
+            MapStateDescriptor<RowData, RowData> bufferStateDesc =
+                    new MapStateDescriptor<>(stateName + "-buffer", uniqueKeyType, recordType);
 
             if (ttlConfig.isEnabled()) {
                 recordStateDesc.enableTimeToLive(ttlConfig);
@@ -225,26 +231,37 @@ public final class JoinRecordStateViews {
         }
 
         @Override
-        public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-                JoinRecordStateView otherView, JoinCondition condition, boolean leftRowOnly,
-                boolean inputIsLeft) throws Exception {
+        public void emitCompleteState(
+                KeyedStateBackend<RowData> be,
+                Collector<RowData> collect,
+                JoinRecordStateView otherView,
+                JoinCondition condition,
+                boolean leftRowOnly,
+                boolean inputIsLeft)
+                throws Exception {
             emitCompleteState(be, collect, otherView, condition);
         }
 
-        private void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-                JoinRecordStateView otherView, JoinCondition condition) throws Exception {
-            MapStateDescriptor<RowData, RowData> recordStateDesc = new MapStateDescriptor<>(stateName, uniqueKeyType,
-                    recordType);
+        private void emitCompleteState(
+                KeyedStateBackend<RowData> be,
+                Collector<RowData> collect,
+                JoinRecordStateView otherView,
+                JoinCondition condition)
+                throws Exception {
+            MapStateDescriptor<RowData, RowData> recordStateDesc =
+                    new MapStateDescriptor<>(stateName, uniqueKeyType, recordType);
 
             JoinedRowData outRow = new JoinedRowData();
             outRow.setRowKind(RowKind.INSERT);
 
-            be.applyToAllKeys(VoidNamespace.INSTANCE,
+            be.applyToAllKeys(
+                    VoidNamespace.INSTANCE,
                     VoidNamespaceSerializer.INSTANCE,
                     recordStateDesc,
                     new KeyedStateFunction<RowData, MapState<RowData, RowData>>() {
                         @Override
-                        public void process(RowData key, MapState<RowData, RowData> state) throws Exception {
+                        public void process(RowData key, MapState<RowData, RowData> state)
+                                throws Exception {
                             // set current key context for otherView fetch
                             be.setCurrentKey(key);
 
@@ -275,8 +292,8 @@ public final class JoinRecordStateViews {
                 String stateName,
                 InternalTypeInfo<RowData> recordType,
                 StateTtlConfig ttlConfig) {
-            MapStateDescriptor<RowData, Integer> recordStateDesc = new MapStateDescriptor<>(stateName, recordType,
-                    Types.INT);
+            MapStateDescriptor<RowData, Integer> recordStateDesc =
+                    new MapStateDescriptor<>(stateName, recordType, Types.INT);
 
             if (ttlConfig.isEnabled()) {
                 recordStateDesc.enableTimeToLive(ttlConfig);
@@ -314,7 +331,8 @@ public final class JoinRecordStateViews {
         public Iterable<RowData> getRecords() throws Exception {
             return new IterableIterator<RowData>() {
 
-                private final Iterator<Map.Entry<RowData, Integer>> backingIterable = recordState.entries().iterator();
+                private final Iterator<Map.Entry<RowData, Integer>> backingIterable =
+                        recordState.entries().iterator();
                 private RowData record;
                 private int remainingTimes = 0;
 
@@ -345,26 +363,37 @@ public final class JoinRecordStateViews {
         }
 
         @Override
-        public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-                JoinRecordStateView otherView, JoinCondition condition, boolean leftRowOnly,
-                boolean inputIsLeft) throws Exception {
+        public void emitCompleteState(
+                KeyedStateBackend<RowData> be,
+                Collector<RowData> collect,
+                JoinRecordStateView otherView,
+                JoinCondition condition,
+                boolean leftRowOnly,
+                boolean inputIsLeft)
+                throws Exception {
             emitCompleteState(be, collect, otherView, condition);
         }
 
-        private void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
-                JoinRecordStateView otherView, JoinCondition condition) throws Exception {
-            MapStateDescriptor<RowData, Integer> recordStateDesc = new MapStateDescriptor<>(stateName, recordType,
-                    Types.INT);
+        private void emitCompleteState(
+                KeyedStateBackend<RowData> be,
+                Collector<RowData> collect,
+                JoinRecordStateView otherView,
+                JoinCondition condition)
+                throws Exception {
+            MapStateDescriptor<RowData, Integer> recordStateDesc =
+                    new MapStateDescriptor<>(stateName, recordType, Types.INT);
 
             JoinedRowData outRow = new JoinedRowData();
             outRow.setRowKind(RowKind.INSERT);
 
-            be.applyToAllKeys(VoidNamespace.INSTANCE,
+            be.applyToAllKeys(
+                    VoidNamespace.INSTANCE,
                     VoidNamespaceSerializer.INSTANCE,
                     recordStateDesc,
                     new KeyedStateFunction<RowData, MapState<RowData, Integer>>() {
                         @Override
-                        public void process(RowData key, MapState<RowData, Integer> state) throws Exception {
+                        public void process(RowData key, MapState<RowData, Integer> state)
+                                throws Exception {
                             // set current key context for otherView fetch
                             be.setCurrentKey(key);
 

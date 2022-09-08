@@ -23,6 +23,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.TimestampedCollector;
 import org.apache.flink.streaming.api.operators.TwoInputStreamOperator;
+import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.generated.GeneratedJoinCondition;
 import org.apache.flink.table.runtime.generated.JoinCondition;
@@ -31,30 +32,14 @@ import org.apache.flink.table.runtime.operators.join.stream.state.JoinInputSideS
 import org.apache.flink.table.runtime.operators.join.stream.state.JoinRecordStateView;
 import org.apache.flink.table.runtime.operators.join.stream.state.OuterJoinRecordStateView;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
+import org.apache.flink.table.runtime.util.RowDataStringSerializer;
 import org.apache.flink.util.IterableIterator;
 
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
-
-import org.apache.flink.types.RowKind;
-import org.apache.flink.types.Row;
-
-import org.apache.flink.table.types.DataType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.util.Collector;
-import org.apache.flink.table.types.utils.TypeConversions;
-import org.apache.flink.streaming.api.watermark.Watermark;
-
-
-
-import java.util.Arrays;
-
 import static org.apache.flink.util.Preconditions.checkNotNull;
-
-import org.apache.flink.table.runtime.util.RowDataStringSerializer;
 
 /**
  * Abstract implementation for streaming unbounded Join operator which defines some member fields
@@ -208,30 +193,29 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
          * Creates an {@link AssociatedRecords} which represents the records associated to the input
          * row.
          */
-
-	public static AssociatedRecords of(
+        public static AssociatedRecords of(
                 RowData input,
                 boolean inputIsLeft,
                 JoinRecordStateView otherSideStateView,
                 JoinCondition condition)
                 throws Exception {
-	    String operator_name = " ";
-	    return AssociatedRecords.of(input, inputIsLeft, null, null, operator_name, otherSideStateView, condition);
-	}
+            String operator_name = " ";
+            return AssociatedRecords.of(
+                    input, inputIsLeft, null, null, operator_name, otherSideStateView, condition);
+        }
 
         public static AssociatedRecords of(
                 RowData input,
                 boolean inputIsLeft,
-        		InternalTypeInfo<RowData> leftType,
-	        	InternalTypeInfo<RowData> rightType,
-		        String operator_name,
+                InternalTypeInfo<RowData> leftType,
+                InternalTypeInfo<RowData> rightType,
+                String operator_name,
                 JoinRecordStateView otherSideStateView,
                 JoinCondition condition)
                 throws Exception {
             List<OuterRecord> associations = new ArrayList<>();
             int rows_fetched = 0;
             int rows_matched = 0;
-
 
             if (otherSideStateView instanceof OuterJoinRecordStateView) {
                 OuterJoinRecordStateView outerStateView =
@@ -243,17 +227,29 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
                             inputIsLeft
                                     ? condition.apply(input, record.f0)
                                     : condition.apply(record.f0, input);
-		            rows_fetched = rows_fetched + 1;
-                        if (matched) {
-			                rows_matched = rows_matched + 1;
-                            associations.add(new OuterRecord(record.f0, record.f1));
-                        }
+                    rows_fetched = rows_fetched + 1;
+                    if (matched) {
+                        rows_matched = rows_matched + 1;
+                        associations.add(new OuterRecord(record.f0, record.f1));
                     }
-            		if ((rows_fetched > 1000 || rows_fetched - rows_matched > 500) && leftType != null && rightType != null) {
-                        RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(inputIsLeft ? leftType : rightType);
-		                LOG.info(operator_name + ": EXPENSIVE Outer Join fetched: " + rows_fetched + ", matched " + rows_matched);
-		                LOG.info(operator_name + ": EXPENSIVE joining " + (inputIsLeft ? " left input: " : "right input: ") + rowStringSerializer.asString(input));
-        		    }
+                }
+                if ((rows_fetched > 1000 || rows_fetched - rows_matched > 500)
+                        && leftType != null
+                        && rightType != null) {
+                    RowDataStringSerializer rowStringSerializer =
+                            new RowDataStringSerializer(inputIsLeft ? leftType : rightType);
+                    LOG.info(
+                            operator_name
+                                    + ": EXPENSIVE Outer Join fetched: "
+                                    + rows_fetched
+                                    + ", matched "
+                                    + rows_matched);
+                    LOG.info(
+                            operator_name
+                                    + ": EXPENSIVE joining "
+                                    + (inputIsLeft ? " left input: " : "right input: ")
+                                    + rowStringSerializer.asString(input));
+                }
             } else {
                 Iterable<RowData> records = otherSideStateView.getRecords();
                 for (RowData record : records) {
@@ -261,18 +257,30 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
                             inputIsLeft
                                     ? condition.apply(input, record)
                                     : condition.apply(record, input);
-		            rows_fetched = rows_fetched + 1;
+                    rows_fetched = rows_fetched + 1;
 
                     if (matched) {
-			            rows_matched = rows_matched + 1;
+                        rows_matched = rows_matched + 1;
                         // use -1 as the default number of associations
                         associations.add(new OuterRecord(record, -1));
                     }
                 }
-		        if ((rows_fetched > 1000 || rows_fetched - rows_matched > 500)  && leftType != null && rightType != null) {
-                    RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(inputIsLeft ? leftType : rightType);
-		            LOG.info(operator_name + ": EXPENSIVE Inner Join fetched: " + rows_fetched + ", matched " + rows_matched);
-        		    LOG.info(operator_name + ": EXPENSIVE Joining " + (inputIsLeft ? " left input: " : "right input: ") + rowStringSerializer.asString(input));
+                if ((rows_fetched > 1000 || rows_fetched - rows_matched > 500)
+                        && leftType != null
+                        && rightType != null) {
+                    RowDataStringSerializer rowStringSerializer =
+                            new RowDataStringSerializer(inputIsLeft ? leftType : rightType);
+                    LOG.info(
+                            operator_name
+                                    + ": EXPENSIVE Inner Join fetched: "
+                                    + rows_fetched
+                                    + ", matched "
+                                    + rows_matched);
+                    LOG.info(
+                            operator_name
+                                    + ": EXPENSIVE Joining "
+                                    + (inputIsLeft ? " left input: " : "right input: ")
+                                    + rowStringSerializer.asString(input));
                 }
             }
             return new AssociatedRecords(associations);

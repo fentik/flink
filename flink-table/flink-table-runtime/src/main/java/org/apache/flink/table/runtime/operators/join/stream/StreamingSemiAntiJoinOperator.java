@@ -18,10 +18,13 @@
 
 package org.apache.flink.table.runtime.operators.join.stream;
 
+import org.apache.flink.api.java.functions.KeySelector;
+import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.util.RowDataUtil;
 import org.apache.flink.table.runtime.generated.GeneratedJoinCondition;
+import org.apache.flink.table.runtime.operators.join.stream.minibatch.MiniBatchJoinBuffer;
 import org.apache.flink.table.runtime.operators.join.stream.state.JoinInputSideSpec;
 import org.apache.flink.table.runtime.operators.join.stream.state.JoinRecordStateView;
 import org.apache.flink.table.runtime.operators.join.stream.state.JoinRecordStateViews;
@@ -29,10 +32,6 @@ import org.apache.flink.table.runtime.operators.join.stream.state.OuterJoinRecor
 import org.apache.flink.table.runtime.operators.join.stream.state.OuterJoinRecordStateViews;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.types.RowKind;
-import org.apache.flink.streaming.api.watermark.Watermark;
-
-import org.apache.flink.table.runtime.operators.join.stream.minibatch.MiniBatchJoinBuffer;
-import org.apache.flink.api.java.functions.KeySelector;
 
 /** Streaming unbounded Join operator which supports SEMI/ANTI JOIN. */
 public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator {
@@ -101,12 +100,18 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
 
         // initialize minibatch buffer states
         if (isMinibatchEnabled) {
-            leftRecordStateBuffer = new MiniBatchJoinBuffer(
-                getOperatorName() + " - LEFT input",
-                leftType, (KeySelector<RowData, RowData>) stateKeySelector1, maxMinibatchSize);
-            rightRecordStateBuffer = new MiniBatchJoinBuffer(
-                getOperatorName() + " - RIGHT input",
-                rightType, (KeySelector<RowData, RowData>) stateKeySelector2, maxMinibatchSize);
+            leftRecordStateBuffer =
+                    new MiniBatchJoinBuffer(
+                            getOperatorName() + " - LEFT input",
+                            leftType,
+                            (KeySelector<RowData, RowData>) stateKeySelector1,
+                            maxMinibatchSize);
+            rightRecordStateBuffer =
+                    new MiniBatchJoinBuffer(
+                            getOperatorName() + " - RIGHT input",
+                            rightType,
+                            (KeySelector<RowData, RowData>) stateKeySelector2,
+                            maxMinibatchSize);
         }
     }
 
@@ -120,12 +125,22 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
         LOG.info("{} emit and switch to streaming", getPrintableName());
         if (isAntiJoin) {
             // Left Anti Join
-            leftRecordStateView.emitAntiJoinState(getKeyedStateBackend(), this.collector,
-                rightRecordStateView, joinCondition, true, true);
+            leftRecordStateView.emitAntiJoinState(
+                    getKeyedStateBackend(),
+                    this.collector,
+                    rightRecordStateView,
+                    joinCondition,
+                    true,
+                    true);
         } else {
             // Left Semi Join
-            leftRecordStateView.emitCompleteState(getKeyedStateBackend(), this.collector,
-                rightRecordStateView, joinCondition, true, true);
+            leftRecordStateView.emitCompleteState(
+                    getKeyedStateBackend(),
+                    this.collector,
+                    rightRecordStateView,
+                    joinCondition,
+                    true,
+                    true);
         }
         setStreamMode(true);
     }
@@ -290,15 +305,19 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
     }
 
     private void flushLeftMinibatch() throws Exception {
-        leftRecordStateBuffer.processBatch(getKeyedStateBackend(), record -> {
-            processElement1(record);
-        });
+        leftRecordStateBuffer.processBatch(
+                getKeyedStateBackend(),
+                record -> {
+                    processElement1(record);
+                });
     }
 
     private void flushRighMinibatch() throws Exception {
-        rightRecordStateBuffer.processBatch(getKeyedStateBackend(), record -> {
-            processElement2(record);
-        });
+        rightRecordStateBuffer.processBatch(
+                getKeyedStateBackend(),
+                record -> {
+                    processElement2(record);
+                });
     }
 
     @Override

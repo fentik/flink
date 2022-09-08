@@ -20,7 +20,6 @@ package org.apache.flink.table.runtime.operators.rank;
 
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.state.MapState;
-import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.MapStateDescriptor;
 import org.apache.flink.api.common.state.StateTtlConfig;
 import org.apache.flink.api.common.state.ValueState;
@@ -29,6 +28,10 @@ import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.typeutils.ListTypeInfo;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.runtime.state.KeyedStateBackend;
+import org.apache.flink.runtime.state.KeyedStateFunction;
+import org.apache.flink.runtime.state.VoidNamespace;
+import org.apache.flink.runtime.state.VoidNamespaceSerializer;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.util.RowDataUtil;
 import org.apache.flink.table.runtime.generated.GeneratedRecordEqualiser;
@@ -36,17 +39,9 @@ import org.apache.flink.table.runtime.generated.RecordEqualiser;
 import org.apache.flink.table.runtime.keyselector.RowDataKeySelector;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.runtime.typeutils.SortedMapTypeInfo;
+import org.apache.flink.table.runtime.util.RowDataStringSerializer;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Collector;
-import org.apache.flink.api.common.eventtime.Watermark;
-
-import org.apache.flink.runtime.state.VoidNamespace;
-import org.apache.flink.runtime.state.VoidNamespaceSerializer;
-
-import org.apache.flink.runtime.state.KeyedStateBackend;
-import org.apache.flink.runtime.state.KeyedStateFunction;
-
-import org.apache.flink.table.runtime.util.RowDataStringSerializer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,14 +53,10 @@ import java.util.Map;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
-import java.io.IOException;
-
 /**
  * A TopN function could handle updating stream.
  *
- * <p>
- * Input stream can contain any change kind: INSERT, DELETE, UPDATE_BEFORE and
- * UPDATE_AFTER.
+ * <p>Input stream can contain any change kind: INSERT, DELETE, UPDATE_BEFORE and UPDATE_AFTER.
  */
 public class RetractableTopNFunction extends AbstractTopNFunction {
 
@@ -76,8 +67,9 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
     // Message to indicate the state is cleared because of ttl restriction. The
     // message could be
     // used to output to log.
-    private static final String STATE_CLEARED_WARN_MSG = "The state is cleared because of state ttl. "
-            + "This will result in incorrect result. You can increase the state ttl to avoid this.";
+    private static final String STATE_CLEARED_WARN_MSG =
+            "The state is cleared because of state ttl. "
+                    + "This will result in incorrect result. You can increase the state ttl to avoid this.";
 
     private final InternalTypeInfo<RowData> sortKeyType;
     private final RowDataStringSerializer sortKeySerializer;
@@ -100,6 +92,7 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
 
     /** timestamp of backfill watermark barrier */
     private boolean isStreamMode = true;
+
     private long count = 0;
     private boolean isBatchBackfillEnabled = false;
     private final TypeSerializer<RowData> inputRowSer;
@@ -142,17 +135,18 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
         generatedEqualiser = null;
 
         ListTypeInfo<RowData> valueTypeInfo = new ListTypeInfo<>(inputRowType);
-        MapStateDescriptor<RowData, List<RowData>> mapStateDescriptor = new MapStateDescriptor<>("data-state",
-                sortKeyType, valueTypeInfo);
+        MapStateDescriptor<RowData, List<RowData>> mapStateDescriptor =
+                new MapStateDescriptor<>("data-state", sortKeyType, valueTypeInfo);
         if (ttlConfig.isEnabled()) {
             mapStateDescriptor.enableTimeToLive(ttlConfig);
         }
         dataState = getRuntimeContext().getMapState(mapStateDescriptor);
 
-        ValueStateDescriptor<SortedMap<RowData, Long>> valueStateDescriptor = new ValueStateDescriptor<>(
-                "sorted-map",
-                new SortedMapTypeInfo<>(
-                        sortKeyType, BasicTypeInfo.LONG_TYPE_INFO, serializableComparator));
+        ValueStateDescriptor<SortedMap<RowData, Long>> valueStateDescriptor =
+                new ValueStateDescriptor<>(
+                        "sorted-map",
+                        new SortedMapTypeInfo<>(
+                                sortKeyType, BasicTypeInfo.LONG_TYPE_INFO, serializableComparator));
         if (ttlConfig.isEnabled()) {
             valueStateDescriptor.enableTimeToLive(ttlConfig);
         }
@@ -180,10 +174,11 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
         return getRuntimeContext().getJobId() + " " + getRuntimeContext().getTaskName();
     }
 
-    public void emitStateAndSwitchToStreaming(Context ctx, Collector<RowData> out,
-            KeyedStateBackend<RowData> be) throws Exception {
+    public void emitStateAndSwitchToStreaming(
+            Context ctx, Collector<RowData> out, KeyedStateBackend<RowData> be) throws Exception {
         if (isStreamMode) {
-            LOG.warn("Programming error in {} -- asked to switch to streaming while not in batch mode",
+            LOG.warn(
+                    "Programming error in {} -- asked to switch to streaming while not in batch mode",
                     getPrintableName());
             return;
         }
@@ -193,8 +188,7 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
         class Counter {
             public long count = 0;
 
-            Counter() {
-            }
+            Counter() {}
         }
 
         Counter counter = new Counter();
@@ -203,22 +197,25 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
          * SORTED-MAP
          * . Map<PARTITION BY clause,
          * ... SortedMap<ORDER BY clause, MAX ROW NUM>>
-         * 
+         *
          * DATA-MAP
          * . Map<PARTITION BY clause,
          * ... Map<ORDER BY clause, List<matching INPUT ROWS>>
          */
-        ValueStateDescriptor<SortedMap<RowData, Long>> smValueStateDescriptor = new ValueStateDescriptor<>(
-                "sorted-map",
-                new SortedMapTypeInfo<>(
-                        sortKeyType, BasicTypeInfo.LONG_TYPE_INFO, serializableComparator));
+        ValueStateDescriptor<SortedMap<RowData, Long>> smValueStateDescriptor =
+                new ValueStateDescriptor<>(
+                        "sorted-map",
+                        new SortedMapTypeInfo<>(
+                                sortKeyType, BasicTypeInfo.LONG_TYPE_INFO, serializableComparator));
 
-        be.applyToAllKeys(VoidNamespace.INSTANCE,
+        be.applyToAllKeys(
+                VoidNamespace.INSTANCE,
                 VoidNamespaceSerializer.INSTANCE,
                 smValueStateDescriptor,
                 new KeyedStateFunction<RowData, ValueState<SortedMap<RowData, Long>>>() {
                     @Override
-                    public void process(RowData key, ValueState<SortedMap<RowData, Long>> state) throws Exception {
+                    public void process(RowData key, ValueState<SortedMap<RowData, Long>> state)
+                            throws Exception {
                         long currRank = 0L;
 
                         // The access to dataState.get() below requires a current key
@@ -250,7 +247,9 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
                     }
                 });
 
-        LOG.info("{} transitioned to Stream mode and emitted {} records", getPrintableName(),
+        LOG.info(
+                "{} transitioned to Stream mode and emitted {} records",
+                getPrintableName(),
                 counter.count);
 
         isStreamMode = true;
@@ -319,7 +318,8 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
                         throw new RuntimeException(STATE_CLEARED_WARN_MSG);
                     }
                 } else {
-                    LOG.warn("Attempt to retract non-existed record"); //, inputRowSerializer.asString(input));
+                    LOG.warn("Attempt to retract non-existed record"); // ,
+                    // inputRowSerializer.asString(input));
                     // throw new RuntimeException(
                     // "Can not retract a non-existent record. This should never happen.");
                 }
@@ -465,13 +465,11 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
     }
 
     /**
-     * Retract the input record and emit updated records. This works for outputting
-     * with row_number.
+     * Retract the input record and emit updated records. This works for outputting with row_number.
      *
-     * While we can simly short circuit the emitRecords* methods while not in stream
-     * mode, the retract* methods modify the state, so we need to have more fine
-     * grained
-     * handling of supressing collect calls.
+     * <p>While we can simly short circuit the emitRecords* methods while not in stream mode, the
+     * retract* methods modify the state, so we need to have more fine grained handling of
+     * supressing collect calls.
      *
      * @return true if the input record has been removed from {@link #dataState}.
      */
@@ -548,8 +546,7 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
     }
 
     /**
-     * Retract the input record and emit updated records. This works for outputting
-     * without
+     * Retract the input record and emit updated records. This works for outputting without
      * row_number.
      *
      * @return true if the input record has been removed from {@link #dataState}.
