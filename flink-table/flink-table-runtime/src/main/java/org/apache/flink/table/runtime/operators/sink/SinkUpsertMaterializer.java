@@ -30,9 +30,10 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.generated.GeneratedRecordEqualiser;
 import org.apache.flink.table.runtime.generated.RecordEqualiser;
 import org.apache.flink.table.runtime.operators.TableStreamOperator;
+import org.apache.flink.table.runtime.util.RowDataStringSerializer;
+import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.ExceptionUtils;
-
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,16 +42,9 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
-import org.apache.flink.table.types.DataType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
-//import org.apache.flink.table.types.utils.TypeConversions;
-
 import static org.apache.flink.types.RowKind.DELETE;
 import static org.apache.flink.types.RowKind.INSERT;
 import static org.apache.flink.types.RowKind.UPDATE_AFTER;
-
-import org.apache.flink.table.runtime.util.RowDataStringSerializer;
 
 /**
  * An operator that maintains incoming records in state corresponding to the upsert keys and
@@ -94,16 +88,18 @@ public class SinkUpsertMaterializer extends TableStreamOperator<RowData>
         this.serializer = serializer;
         this.generatedEqualiser = generatedEqualiser;
         this.rowStringSerializer = null;
-        LOG.info("WARNING: SinkUpsertMaterializer is being called without the physicalRowType - This reduces what we can log for debugging. See the stacktrace to see if you can fix the caller.");
-        String stacktrace = ExceptionUtils.stringifyException((new Exception("Missing RowType information")));
+        LOG.info(
+                "WARNING: SinkUpsertMaterializer is being called without the physicalRowType - This reduces what we can log for debugging. See the stacktrace to see if you can fix the caller.");
+        String stacktrace =
+                ExceptionUtils.stringifyException((new Exception("Missing RowType information")));
         LOG.info(stacktrace);
     }
 
     public SinkUpsertMaterializer(
-        StateTtlConfig ttlConfig,
-        TypeSerializer<RowData> serializer,
-        GeneratedRecordEqualiser generatedEqualiser,
-        RowType physicalRowType) {
+            StateTtlConfig ttlConfig,
+            TypeSerializer<RowData> serializer,
+            GeneratedRecordEqualiser generatedEqualiser,
+            RowType physicalRowType) {
         this.ttlConfig = ttlConfig;
         this.serializer = serializer;
         this.generatedEqualiser = generatedEqualiser;
@@ -132,11 +128,26 @@ public class SinkUpsertMaterializer extends TableStreamOperator<RowData>
             values = new ArrayList<>(2);
         }
         if (this.shouldLogInput()) {
-            if (this.rowStringSerializer!= null) {
-                LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with "
-                    + values.size() + " values : " + rowStringSerializer.asString(row));
+            if (this.rowStringSerializer != null) {
+                LOG.info(
+                        "[SubTask Id: ("
+                                + getRuntimeContext().getIndexOfThisSubtask()
+                                + ")]: Processing input ("
+                                + row.getRowKind()
+                                + ") with "
+                                + values.size()
+                                + " values : "
+                                + rowStringSerializer.asString(row));
             } else {
-                LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input (" + row.getRowKind() + ") with " + values.size() + " values : " + element.toString());
+                LOG.info(
+                        "[SubTask Id: ("
+                                + getRuntimeContext().getIndexOfThisSubtask()
+                                + ")]: Processing input ("
+                                + row.getRowKind()
+                                + ") with "
+                                + values.size()
+                                + " values : "
+                                + element.toString());
             }
         }
         switch (row.getRowKind()) {

@@ -64,9 +64,9 @@ import org.apache.flink.table.runtime.connector.sink.SinkRuntimeProviderContext;
 import org.apache.flink.table.runtime.generated.GeneratedRecordEqualiser;
 import org.apache.flink.table.runtime.keyselector.RowDataKeySelector;
 import org.apache.flink.table.runtime.operators.sink.ConstraintEnforcer;
+import org.apache.flink.table.runtime.operators.sink.DedupSinkUpsertMaterializer;
 import org.apache.flink.table.runtime.operators.sink.SinkOperator;
 import org.apache.flink.table.runtime.operators.sink.SinkUpsertMaterializer;
-import org.apache.flink.table.runtime.operators.sink.DedupSinkUpsertMaterializer;
 import org.apache.flink.table.runtime.operators.sink.StreamRecordTimestampInserter;
 import org.apache.flink.table.runtime.typeutils.InternalSerializers;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
@@ -187,11 +187,19 @@ public abstract class CommonExecSink extends ExecNodeBase<Object>
             if (config.get(ExecutionConfigOptions.TABLE_EXEC_DEDUP_SINK_MATERIALIZER)) {
                 sinkTransform =
                         applyDedupUpsertMaterialize(
-                                sinkTransform, primaryKeys, sinkParallelism, config, physicalRowType);
+                                sinkTransform,
+                                primaryKeys,
+                                sinkParallelism,
+                                config,
+                                physicalRowType);
             } else {
                 sinkTransform =
-                applyUpsertMaterialize(
-                        sinkTransform, primaryKeys, sinkParallelism, config, physicalRowType);
+                        applyUpsertMaterialize(
+                                sinkTransform,
+                                primaryKeys,
+                                sinkParallelism,
+                                config,
+                                physicalRowType);
             }
         }
 
@@ -438,11 +446,11 @@ public abstract class CommonExecSink extends ExecNodeBase<Object>
     }
 
     private Transformation<RowData> applyDedupUpsertMaterialize(
-        Transformation<RowData> inputTransform,
-        int[] primaryKeys,
-        int sinkParallelism,
-        ReadableConfig config,
-        RowType physicalRowType) {
+            Transformation<RowData> inputTransform,
+            int[] primaryKeys,
+            int sinkParallelism,
+            ReadableConfig config,
+            RowType physicalRowType) {
         GeneratedRecordEqualiser equaliser =
                 new EqualiserCodeGenerator(physicalRowType)
                         .generateRecordEqualiser("DedupSinkMaterializeEqualiser");
@@ -452,8 +460,7 @@ public abstract class CommonExecSink extends ExecNodeBase<Object>
                                 config.get(ExecutionConfigOptions.IDLE_STATE_RETENTION).toMillis()),
                         InternalTypeInfo.of(physicalRowType),
                         equaliser,
-                        config.get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL)
-                        );
+                        config.get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL));
         final String[] fieldNames = physicalRowType.getFieldNames().toArray(new String[0]);
         final List<String> pkFieldNames =
                 Arrays.stream(primaryKeys)

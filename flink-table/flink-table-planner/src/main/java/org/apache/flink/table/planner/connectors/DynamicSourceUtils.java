@@ -65,11 +65,6 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-
-
 import static org.apache.flink.table.types.logical.utils.LogicalTypeCasts.supportsExplicitCast;
 
 /** Utilities for dealing with {@link DynamicTableSource}. */

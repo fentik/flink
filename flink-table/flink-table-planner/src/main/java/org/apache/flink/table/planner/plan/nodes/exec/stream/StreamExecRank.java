@@ -25,6 +25,7 @@ import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.streaming.api.operators.KeyedProcessOperator;
 import org.apache.flink.streaming.api.transformations.OneInputTransformation;
 import org.apache.flink.table.api.TableException;
+import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.planner.codegen.EqualiserCodeGenerator;
 import org.apache.flink.table.planner.codegen.sort.ComparatorCodeGenerator;
@@ -60,8 +61,6 @@ import org.apache.flink.table.runtime.typeutils.TypeCheckUtils;
 import org.apache.flink.table.runtime.util.StateConfigUtil;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.api.config.ExecutionConfigOptions;
-
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
@@ -217,7 +216,8 @@ public class StreamExecRank extends ExecNodeBase<RowData>
         long cacheSize = config.get(TABLE_EXEC_RANK_TOPN_CACHE_SIZE);
         StateTtlConfig ttlConfig = StateConfigUtil.createTtlConfig(config.getStateRetentionTime());
 
-        final boolean isBatchBackfillEnabled = config.get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL);
+        final boolean isBatchBackfillEnabled =
+                config.get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL);
 
         AbstractTopNFunction processFunction;
         if (rankStrategy instanceof RankProcessStrategy.AppendFastStrategy) {

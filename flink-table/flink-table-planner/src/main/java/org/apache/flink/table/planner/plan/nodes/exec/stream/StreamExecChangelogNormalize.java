@@ -27,7 +27,6 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.transformations.OneInputTransformation;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.planner.codegen.EqualiserCodeGenerator;
 import org.apache.flink.table.planner.codegen.IgnoringEqualiserCodeGenerator;
 import org.apache.flink.table.planner.delegation.PlannerBase;
 import org.apache.flink.table.planner.plan.nodes.exec.ExecEdge;
@@ -53,25 +52,28 @@ import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-import java.util.Collections;
-import java.util.List;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Collections;
+import java.util.List;
+
 /**
- * Stream {@link ExecNode} which normalizes a changelog stream which maybe an
- * upsert stream or a
- * changelog stream containing duplicate events. This node normalize such stream
- * into a regular
- * changelog stream that contains INSERT/UPDATE_BEFORE/UPDATE_AFTER/DELETE
- * records without
+ * Stream {@link ExecNode} which normalizes a changelog stream which maybe an upsert stream or a
+ * changelog stream containing duplicate events. This node normalize such stream into a regular
+ * changelog stream that contains INSERT/UPDATE_BEFORE/UPDATE_AFTER/DELETE records without
  * duplication.
  */
-@ExecNodeMetadata(name = "stream-exec-changelog-normalize", version = 1, consumedOptions = {
-        "table.exec.mini-batch.enabled",
-        "table.exec.mini-batch.size",
-}, producedTransformations = StreamExecChangelogNormalize.CHANGELOG_NORMALIZE_TRANSFORMATION, minPlanVersion = FlinkVersion.v1_15, minStateVersion = FlinkVersion.v1_15)
+@ExecNodeMetadata(
+        name = "stream-exec-changelog-normalize",
+        version = 1,
+        consumedOptions = {
+            "table.exec.mini-batch.enabled",
+            "table.exec.mini-batch.size",
+        },
+        producedTransformations = StreamExecChangelogNormalize.CHANGELOG_NORMALIZE_TRANSFORMATION,
+        minPlanVersion = FlinkVersion.v1_15,
+        minStateVersion = FlinkVersion.v1_15)
 public class StreamExecChangelogNormalize extends ExecNodeBase<RowData>
         implements StreamExecNode<RowData>, SingleTransformationTranslator<RowData> {
 
@@ -125,55 +127,64 @@ public class StreamExecChangelogNormalize extends ExecNodeBase<RowData>
     protected Transformation<RowData> translateToPlanInternal(
             PlannerBase planner, ExecNodeConfig config) {
         final ExecEdge inputEdge = getInputEdges().get(0);
-        final Transformation<RowData> inputTransform = (Transformation<RowData>) inputEdge.translateToPlan(planner);
-        final InternalTypeInfo<RowData> rowTypeInfo = (InternalTypeInfo<RowData>) inputTransform.getOutputType();
+        final Transformation<RowData> inputTransform =
+                (Transformation<RowData>) inputEdge.translateToPlan(planner);
+        final InternalTypeInfo<RowData> rowTypeInfo =
+                (InternalTypeInfo<RowData>) inputTransform.getOutputType();
 
         final OneInputStreamOperator<RowData, RowData> operator;
         final long stateIdleTime = config.getStateRetentionTime();
-        final boolean isMiniBatchEnabled = config.get(ExecutionConfigOptions.TABLE_EXEC_MINIBATCH_ENABLED);
+        final boolean isMiniBatchEnabled =
+                config.get(ExecutionConfigOptions.TABLE_EXEC_MINIBATCH_ENABLED);
 
-        String[] ignoredFields = { "last_modified_ts", "last_modified", "latest_webhook_processed", "__event_time" };
+        String[] ignoredFields = {
+            "last_modified_ts", "last_modified", "latest_webhook_processed", "__event_time"
+        };
         RowType type = rowTypeInfo.toRowType();
         String[] fieldNames = type.getFieldNames().toArray(new String[0]);
-        GeneratedRecordEqualiser generatedEqualiser = new IgnoringEqualiserCodeGenerator(type,
-                fieldNames,
-                ignoredFields)
-                .generateRecordEqualiser("DeduplicateRowEqualiser");
+        GeneratedRecordEqualiser generatedEqualiser =
+                new IgnoringEqualiserCodeGenerator(type, fieldNames, ignoredFields)
+                        .generateRecordEqualiser("DeduplicateRowEqualiser");
 
         LOG.info("CDC generateUpdateBefore {}", generateUpdateBefore);
         LOG.info("EQUALIZER code {}", generatedEqualiser.getCode());
 
         if (isMiniBatchEnabled) {
-            TypeSerializer<RowData> rowSerializer = rowTypeInfo.createSerializer(planner.getExecEnv().getConfig());
-            ProcTimeMiniBatchDeduplicateKeepLastRowFunction processFunction = new ProcTimeMiniBatchDeduplicateKeepLastRowFunction(
-                    rowTypeInfo,
-                    rowSerializer,
-                    stateIdleTime,
-                    generateUpdateBefore,
-                    true, // generateInsert
-                    false, // inputInsertOnly
-                    generatedEqualiser);
+            TypeSerializer<RowData> rowSerializer =
+                    rowTypeInfo.createSerializer(planner.getExecEnv().getConfig());
+            ProcTimeMiniBatchDeduplicateKeepLastRowFunction processFunction =
+                    new ProcTimeMiniBatchDeduplicateKeepLastRowFunction(
+                            rowTypeInfo,
+                            rowSerializer,
+                            stateIdleTime,
+                            generateUpdateBefore,
+                            true, // generateInsert
+                            false, // inputInsertOnly
+                            generatedEqualiser);
             CountBundleTrigger<RowData> trigger = AggregateUtil.createMiniBatchTrigger(config);
             operator = new KeyedMapBundleOperator<>(processFunction, trigger);
         } else {
-            ProcTimeDeduplicateKeepLastRowFunction processFunction = new ProcTimeDeduplicateKeepLastRowFunction(
-                    rowTypeInfo,
-                    stateIdleTime,
-                    generateUpdateBefore,
-                    true, // generateInsert
-                    false, // inputInsertOnly
-                    generatedEqualiser);
+            ProcTimeDeduplicateKeepLastRowFunction processFunction =
+                    new ProcTimeDeduplicateKeepLastRowFunction(
+                            rowTypeInfo,
+                            stateIdleTime,
+                            generateUpdateBefore,
+                            true, // generateInsert
+                            false, // inputInsertOnly
+                            generatedEqualiser);
             operator = new KeyedProcessOperator<>(processFunction);
         }
 
-        final OneInputTransformation<RowData, RowData> transform = ExecNodeUtil.createOneInputTransformation(
-                inputTransform,
-                createTransformationMeta(CHANGELOG_NORMALIZE_TRANSFORMATION, config),
-                operator,
-                rowTypeInfo,
-                inputTransform.getParallelism());
+        final OneInputTransformation<RowData, RowData> transform =
+                ExecNodeUtil.createOneInputTransformation(
+                        inputTransform,
+                        createTransformationMeta(CHANGELOG_NORMALIZE_TRANSFORMATION, config),
+                        operator,
+                        rowTypeInfo,
+                        inputTransform.getParallelism());
 
-        final RowDataKeySelector selector = KeySelectorUtil.getRowDataSelector(uniqueKeys, rowTypeInfo);
+        final RowDataKeySelector selector =
+                KeySelectorUtil.getRowDataSelector(uniqueKeys, rowTypeInfo);
         transform.setStateKeySelector(selector);
         transform.setStateKeyType(selector.getProducedType());
 

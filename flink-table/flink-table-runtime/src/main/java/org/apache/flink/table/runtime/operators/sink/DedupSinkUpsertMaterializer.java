@@ -21,23 +21,21 @@ package org.apache.flink.table.runtime.operators.sink;
 import org.apache.flink.api.common.state.StateTtlConfig;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
-import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.common.typeutils.base.ListSerializer;
+import org.apache.flink.api.common.typeinfo.Types;
+import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.typeutils.ListTypeInfo;
+import org.apache.flink.api.java.typeutils.TupleTypeInfo;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.TimestampedCollector;
+import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.generated.GeneratedRecordEqualiser;
 import org.apache.flink.table.runtime.generated.RecordEqualiser;
 import org.apache.flink.table.runtime.operators.TableStreamOperator;
-import org.apache.flink.types.RowKind;
-import org.apache.flink.util.ExceptionUtils;
-import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.api.java.typeutils.ListTypeInfo;
-import org.apache.flink.api.java.typeutils.TupleTypeInfo;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
-import org.apache.flink.api.common.typeinfo.Types;
-import org.apache.flink.streaming.api.watermark.Watermark;
+import org.apache.flink.table.runtime.util.RowDataStringSerializer;
+import org.apache.flink.types.RowKind;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,28 +44,19 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
-import org.apache.flink.table.types.DataType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
-//import org.apache.flink.table.types.utils.TypeConversions;
-
 import static org.apache.flink.types.RowKind.DELETE;
 import static org.apache.flink.types.RowKind.INSERT;
 import static org.apache.flink.types.RowKind.UPDATE_AFTER;
 
-import org.apache.flink.table.runtime.util.RowDataStringSerializer;
-
 /**
- * An operator that maintains incoming records in state corresponding to the
- * upsert keys and
+ * An operator that maintains incoming records in state corresponding to the upsert keys and
  * generates an upsert view for the downstream operator.
  *
  * <ul>
- * <li>Adds an insertion to state and emits it with updated {@link RowKind}.
- * <li>Applies a deletion to state.
- * <li>Emits a deletion with updated {@link RowKind} iff affects the last record
- * or the state is
- * empty afterwards. A deletion to an already updated record is swallowed.
+ *   <li>Adds an insertion to state and emits it with updated {@link RowKind}.
+ *   <li>Applies a deletion to state.
+ *   <li>Emits a deletion with updated {@link RowKind} iff affects the last record or the state is
+ *       empty afterwards. A deletion to an already updated record is swallowed.
  * </ul>
  */
 public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
@@ -77,8 +66,9 @@ public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
 
     private static final Logger LOG = LoggerFactory.getLogger(DedupSinkUpsertMaterializer.class);
 
-    private static final String STATE_CLEARED_WARN_MSG = "The state is cleared because of state ttl. This will result in incorrect result. "
-            + "You can increase the state ttl to avoid this.";
+    private static final String STATE_CLEARED_WARN_MSG =
+            "The state is cleared because of state ttl. This will result in incorrect result. "
+                    + "You can increase the state ttl to avoid this.";
 
     private final StateTtlConfig ttlConfig;
     private final InternalTypeInfo<RowData> recordType;
@@ -112,11 +102,12 @@ public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
     @Override
     public void open() throws Exception {
         super.open();
-        this.equaliser = generatedEqualiser.newInstance(getRuntimeContext().getUserCodeClassLoader());
-        ListTypeInfo<Tuple2<RowData, Integer>> valueTypeInfo = new ListTypeInfo<>(
-                new TupleTypeInfo(recordType, Types.INT));
-        ValueStateDescriptor<List<Tuple2<RowData, Integer>>> descriptor = new ValueStateDescriptor<>("values",
-                valueTypeInfo);
+        this.equaliser =
+                generatedEqualiser.newInstance(getRuntimeContext().getUserCodeClassLoader());
+        ListTypeInfo<Tuple2<RowData, Integer>> valueTypeInfo =
+                new ListTypeInfo<>(new TupleTypeInfo(recordType, Types.INT));
+        ValueStateDescriptor<List<Tuple2<RowData, Integer>>> descriptor =
+                new ValueStateDescriptor<>("values", valueTypeInfo);
         if (ttlConfig.isEnabled()) {
             descriptor.enableTimeToLive(ttlConfig);
         }
@@ -154,17 +145,26 @@ public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
             values = new ArrayList<>(2);
         }
         if (this.shouldLogInput()) {
-            LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input ("
-                    + row.getRowKind() + ") with "
-                    + values.size() + " values : " + rowStringSerializer.asString(row));
+            LOG.info(
+                    "[SubTask Id: ("
+                            + getRuntimeContext().getIndexOfThisSubtask()
+                            + ")]: Processing input ("
+                            + row.getRowKind()
+                            + ") with "
+                            + values.size()
+                            + " values : "
+                            + rowStringSerializer.asString(row));
         }
         switch (row.getRowKind()) {
             case INSERT:
             case UPDATE_AFTER:
                 if (values.size() > maxValueLength) {
                     maxValueLength = values.size();
-                    LOG.info("DEDUP new maxValueLength {} for row {} iStreaming {}", maxValueLength,
-                            rowStringSerializer.asString(row), isStreaming);
+                    LOG.info(
+                            "DEDUP new maxValueLength {} for row {} iStreaming {}",
+                            maxValueLength,
+                            rowStringSerializer.asString(row),
+                            isStreaming);
                 }
                 row.setRowKind(values.isEmpty() ? INSERT : UPDATE_AFTER);
                 // Add a new row if it doesn't exist, otherwise update the tuple with

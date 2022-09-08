@@ -40,12 +40,12 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.InstantiationUtil;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.stream.IntStream;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /** Serializer for {@link RowData}. */
 @Internal
@@ -346,8 +346,10 @@ public class RowDataSerializer extends AbstractRowDataSerializer<RowData> {
 
             RowDataSerializer newRowSerializer = (RowDataSerializer) newSerializer;
             if (!Arrays.equals(previousTypes, newRowSerializer.types)) {
-                LOG.warn("SNAPSHOT field types mismatch: previous types {}  new types {}",
-                    previousTypes, newRowSerializer.types);
+                LOG.warn(
+                        "SNAPSHOT field types mismatch: previous types {}  new types {}",
+                        previousTypes,
+                        newRowSerializer.types);
                 return TypeSerializerSchemaCompatibility.incompatible();
             }
 

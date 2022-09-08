@@ -23,6 +23,7 @@ import org.apache.flink.FlinkVersion;
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.streaming.api.transformations.TwoInputTransformation;
+import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.planner.delegation.PlannerBase;
 import org.apache.flink.table.planner.plan.nodes.exec.ExecEdge;
@@ -54,8 +55,6 @@ import java.util.List;
 
 import static org.apache.flink.util.Preconditions.checkArgument;
 import static org.apache.flink.util.Preconditions.checkNotNull;
-
-import org.apache.flink.table.api.config.ExecutionConfigOptions;
 
 /**
  * {@link StreamExecNode} for regular Joins.
@@ -159,9 +158,12 @@ public class StreamExecJoin extends ExecNodeBase<RowData>
 
         long minRetentionTime = config.getStateRetentionTime();
 
-        final boolean isBatchBackfillEnabled = config.get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL);
-        final boolean isMinibatchEnabled = config.get(ExecutionConfigOptions.TABLE_EXEC_MINIBATCH_ENABLED);
-        final int maxMinibatchSize = config.get(ExecutionConfigOptions.TABLE_EXEC_MINIBATCH_JOIN_MAX_SIZE);
+        final boolean isBatchBackfillEnabled =
+                config.get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL);
+        final boolean isMinibatchEnabled =
+                config.get(ExecutionConfigOptions.TABLE_EXEC_MINIBATCH_ENABLED);
+        final int maxMinibatchSize =
+                config.get(ExecutionConfigOptions.TABLE_EXEC_MINIBATCH_JOIN_MAX_SIZE);
 
         AbstractStreamingJoinOperator operator;
         FlinkJoinType joinType = joinSpec.getJoinType();
