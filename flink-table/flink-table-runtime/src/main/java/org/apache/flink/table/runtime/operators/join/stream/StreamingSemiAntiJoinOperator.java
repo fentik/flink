@@ -290,15 +290,19 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
     }
 
     private void flushLeftMinibatch() throws Exception {
-        leftRecordStateBuffer.processBatch(getKeyedStateBackend(), record -> {
-            processElement1(record);
-        });
+        if (isMinibatchEnabled) {
+            leftRecordStateBuffer.processBatch(getKeyedStateBackend(), record -> {
+                processElement1(record);
+            });
+        }
     }
 
     private void flushRighMinibatch() throws Exception {
-        rightRecordStateBuffer.processBatch(getKeyedStateBackend(), record -> {
-            processElement2(record);
-        });
+        if (isMinibatchEnabled) {
+            rightRecordStateBuffer.processBatch(getKeyedStateBackend(), record -> {
+                processElement2(record);
+            });
+        }
     }
 
     @Override
