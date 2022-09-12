@@ -535,8 +535,9 @@ public final class OuterJoinRecordStateViews {
                             // set current key context for otherView fetch
                             be.setCurrentKey(key);
 
-                            for (Map.Entry<RowData, Tuple2<Integer, Integer>> entry : state.entries()) {
-                                RowData thisRow = entry.getKey();
+                            Iterator<RowData> iterator = getRecords().iterator();
+                            while (iterator.hasNext()) {
+                                RowData thisRow = iterator.next();
                                 processElements(otherView, collect, condition, inputIsLeft, outRow,
                                         thisRow, otherNullRow, isAntiJoin, inputRowOnly);
                             }
