@@ -31,9 +31,10 @@ cp ./flink-filesystems/flink-s3-fs-presto/target/flink-s3-fs-presto-1.15.0.jar $
 # Build a Flink binary.
 echo "Building Flink binary at /opt/${FLINK_BASE}.tar.gz"
 find /opt/${FLINK_BASE}/log -type f | xargs rm -f
-mv -f /opt/${FLINK_BASE}/conf/flink-conf.yaml /opt/${FLINK_BASE}/conf/flink-conf.yaml.orig
 pushd /opt
 rm -f ${FLINK_BASE}.tar.gz
-tar zcfh ${FLINK_BASE}.tar.gz ${FLINK_BASE}
+tar --exclude ${FLINK_BASE}/conf/flink-conf.yaml -zchf ${FLINK_BASE}.tar.gz ${FLINK_BASE}
 popd
-mv -f /opt/${FLINK_BASE}/conf/flink-conf.yaml.orig /opt/${FLINK_BASE}/conf/flink-conf.yaml
+
+# Restore configuration.
+ln -sf /opt/dataflo/python/ops/flink-config/flink-conf.staging.yaml /opt/${FLINK_BASE}/conf/flink-conf.yaml
