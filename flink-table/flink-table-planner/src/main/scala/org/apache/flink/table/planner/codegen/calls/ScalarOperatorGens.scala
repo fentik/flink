@@ -41,6 +41,7 @@ import org.apache.flink.table.types.logical.utils.LogicalTypeChecks.getFieldType
 import org.apache.flink.table.types.logical.utils.LogicalTypeMerging.findCommonType
 import org.apache.flink.table.utils.DateTimeUtils.MILLIS_PER_DAY
 import org.apache.flink.util.Preconditions.checkArgument
+import org.apache.flink.table.planner.utils.Logging
 
 import java.time.ZoneId
 import java.util.Arrays.asList
@@ -50,7 +51,7 @@ import scala.collection.JavaConversions._
   * Utilities to generate SQL scalar operators, e.g. arithmetic operator,
   * compare operator, equal operator, etc.
   */
-object ScalarOperatorGens {
+object ScalarOperatorGens extends Logging {
 
   // ----------------------------------------------------------------------------------------
   // scalar operators generate utils
@@ -1414,6 +1415,7 @@ object ScalarOperatorGens {
 
     val code =
       s"""
+         | ${elements.head.code}
          | $boxedResultTypeTerm $tmpResult = ${castIfNumeric(elements.head)};
          | $primitiveResultTypeTerm $result = ${primitiveDefaultValue(widerType.get)};
          | boolean $nullTerm = false;
@@ -1422,6 +1424,9 @@ object ScalarOperatorGens {
          |   $result = $tmpResult;
          | }
        """.stripMargin
+
+    // LOG.info(s"$code")
+
     GeneratedExpression(result, nullTerm, code, resultType)
   }
 
