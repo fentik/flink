@@ -119,8 +119,8 @@ object OperatorCodeGenerator extends Logging {
       }
     """.stripMargin
 
-    LOG.info(s"Compiling OneInputStreamOperator Code:\n$name")
-    LOG.info(s"Code: \n$operatorCode")
+    LOG.debug(s"Compiling OneInputStreamOperator Code:\n$name")
+    LOG.trace(s"Code: \n$operatorCode")
     new GeneratedOperator(
       operatorName, operatorCode, ctx.references.toArray, ctx.tableConfig.getConfiguration)
   }
