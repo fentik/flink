@@ -1398,13 +1398,15 @@ object ScalarOperatorGens {
     val elementsCode = elements.map { element =>
       s"""
          | ${element.code}
-         | // boxedResultTypeTerm tmpResult = {castIfNumeric(elements.head)};
+         | // boxedResultTypeTerm tmpResult = {castIfNumeric(elements.head)}; 
          | $boxedResultTypeTerm $tmpResult = ${castIfNumeric(elements.head)};
          | // primitiveResultTypeTerm result = {primitiveDefaultValue(widerType.get)};
          | $primitiveResultTypeTerm $result = ${primitiveDefaultValue(widerType.get)};
-         | $boxedResultTypeTerm $cur = ${castIfNumeric(element)};
-         | if (!${element.nullTerm}) {
-         |     $nullTerm = false;
+         | if (!$nullTerm) {
+         |   $boxedResultTypeTerm $cur = ${castIfNumeric(element)};
+         |   if (${element.nullTerm}) {
+         |     $nullTerm = true;
+         |   } else {
          |     int compareResult = $tmpResult.compareTo($cur);
          |     if (($greatest && compareResult < 0) || (compareResult > 0 && !$greatest)) {
          |       $tmpResult = $cur;
@@ -1416,8 +1418,8 @@ object ScalarOperatorGens {
 
     val code =
       s"""
-         | // boolean nullTerm = true;
-         | boolean $nullTerm = true;
+         | // boolean nullTerm = false;
+         | boolean $nullTerm = false;
          | // elementsCode
          | $elementsCode
          | // if (!nullTerm) {
