@@ -140,8 +140,8 @@ public class StreamExecChangelogNormalize extends ExecNodeBase<RowData>
                 ignoredFields)
                 .generateRecordEqualiser("DeduplicateRowEqualiser");
 
-        LOG.info("CDC generateUpdateBefore {}", generateUpdateBefore);
-        LOG.info("EQUALIZER code {}", generatedEqualiser.getCode());
+        LOG.debug("CDC generateUpdateBefore {}", generateUpdateBefore);
+        LOG.debug("EQUALIZER code {}", generatedEqualiser.getCode());
 
         if (isMiniBatchEnabled) {
             TypeSerializer<RowData> rowSerializer = rowTypeInfo.createSerializer(planner.getExecEnv().getConfig());
