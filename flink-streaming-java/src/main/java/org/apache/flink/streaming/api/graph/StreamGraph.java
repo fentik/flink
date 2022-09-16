@@ -122,6 +122,7 @@ public class StreamGraph implements Pipeline {
     private Set<Integer> sinks;
     private Map<Integer, Tuple2<Integer, OutputTag>> virtualSideOutputNodes;
     private Map<Integer, Tuple3<Integer, StreamPartitioner<?>, StreamExchangeMode>> virtualPartitionNodes;
+    private Map<String, Integer> perOperatorParallelism;
 
     protected Map<Integer, String> vertexIDtoBrokerID;
     protected Map<Integer, Long> vertexIDtoLoopTimeout;
@@ -159,6 +160,7 @@ public class StreamGraph implements Pipeline {
         sources = new HashSet<>();
         sinks = new HashSet<>();
         slotSharingGroupResources = new HashMap<>();
+        this.perOperatorParallelism = new HashMap<>();
     }
 
     public ExecutionConfig getExecutionConfig() {
@@ -305,6 +307,35 @@ public class StreamGraph implements Pipeline {
 
     public void setHoldBatchForSavepoint(boolean holdBatchForSavepoint) {
         this.holdBatchForSavepoint = holdBatchForSavepoint;
+    }
+
+    public void setPerOperatorParallelism(Map<String, Integer> perOperatorParallelism) {
+        this.perOperatorParallelism = perOperatorParallelism;
+    }
+
+    public void setPerOperatorParallelism(String perOperatorConfig) {
+        HashMap<String, Integer> perOperatorParallelism = new HashMap<String, Integer>();
+        if (perOperatorConfig.length() != 0) {
+            String[] opts = perOperatorConfig.split(",");
+            if (opts.length % 2 != 0) {
+                LOG.warn("Unable to parse per operator config: '{}'", perOperatorConfig);
+            } else {
+                for (int i = 0; i < opts.length; i += 2) {
+                    String opID = opts[i];
+                    Integer parallelism = Integer.valueOf(opts[i + 1]);
+                    perOperatorParallelism.put(opID, parallelism);
+                }
+            }
+        }
+        setPerOperatorParallelism(perOperatorParallelism);
+    }
+
+    public Integer getPerOperatorParallelism(String opID) {
+        if (perOperatorParallelism.containsKey(opID)) {
+            return perOperatorParallelism.get(opID);
+        } else {
+            return null;
+        }
     }
 
     // Checkpointing
