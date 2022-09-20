@@ -26,6 +26,7 @@ import org.apache.calcite.rel.{RelNode, RelShuttleImpl}
 import org.apache.calcite.rex.{RexCorrelVariable, RexVisitorImpl}
 import org.apache.calcite.sql2rel.RelDecorrelator
 import org.apache.calcite.util.Util
+import org.apache.flink.table.planner.utils.Logging
 
 import scala.collection.JavaConversions._
 
@@ -35,7 +36,7 @@ import scala.collection.JavaConversions._
   *
   * @tparam OC OptimizeContext
   */
-class FlinkDecorrelateProgram[OC <: FlinkOptimizeContext] extends FlinkOptimizeProgram[OC] {
+class FlinkDecorrelateProgram[OC <: FlinkOptimizeContext] extends FlinkOptimizeProgram[OC] with Logging {
 
   def optimize(root: RelNode, context: OC): RelNode = {
     val result = RelDecorrelator.decorrelateQuery(root)
@@ -53,9 +54,15 @@ class FlinkDecorrelateProgram[OC <: FlinkOptimizeContext] extends FlinkOptimizeP
     try {
       checkCorrelVariableOf(root)
     } catch {
-      case fo: Util.FoundOne =>
-        throw new TableException(s"unexpected correlate variable " +
-          s"${fo.getNode.asInstanceOf[RexCorrelVariable].id} in the plan")
+       case fo: Util.FoundOne => {
+        LOG.warn("Found an correlated value which we are ignoring")
+       }
+  /**  TODO(akhilg): Commenting it out since it gets triggered when we have a CROSS join
+    *  with nested queries. See https://github.com/fentik/dataflo/issues/432
+    */
+  /***     throw new TableException(s"unexpected correlate variable " +
+  *        s"${fo.getNode.asInstanceOf[RexCorrelVariable].id} in the plan")
+  */
     }
   }
 
