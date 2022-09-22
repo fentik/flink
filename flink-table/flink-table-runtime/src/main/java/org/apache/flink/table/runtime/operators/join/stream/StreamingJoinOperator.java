@@ -174,7 +174,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
             // RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(leftType);
             // LOG.debug("MINIBATCH element 1 (left) input {} kind {} key {}", rowStringSerializer.asString(input),
             //         input.getRowKind(), getCurrentKey());
-            leftRecordStateBuffer.addRecordToBatch(input);
+            leftRecordStateBuffer.addRecordToBatch(input, this.shouldLogInput());
             if (leftRecordStateBuffer.batchNeedsFlush()) {
                 flushLeftMinibatch();
             }
@@ -190,7 +190,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
             // RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(rightType);
             // LOG.debug("MINIBATCH element 2 (right) input {} kind {} key {}", rowStringSerializer.asString(input),
             //         input.getRowKind(), getCurrentKey());
-            rightRecordStateBuffer.addRecordToBatch(input);
+            rightRecordStateBuffer.addRecordToBatch(input, this.shouldLogInput());
             if (rightRecordStateBuffer.batchNeedsFlush()) {
                 flushRighMinibatch();
             }
@@ -218,7 +218,11 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
     @Override
     public void processWatermark(Watermark mark) throws Exception {
         if (!isBatchMode()) {
-            LOG.debug("MINIBATCH WATERMARK in streaming mode {}", mark);
+            if (this.shouldLogInput()){
+                LOG.info("MINIBATCH WATERMARK in streaming mode {}", mark);
+            } else {
+                LOG.debug("MINIBATCH WATERMARK in streaming mode {}", mark);
+            }
             flushRighMinibatch();
             flushLeftMinibatch();
         }
