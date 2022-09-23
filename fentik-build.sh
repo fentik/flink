@@ -36,5 +36,14 @@ rm -f ${FLINK_BASE}.tar.gz
 tar --exclude ${FLINK_BASE}/conf/flink-conf.yaml -zchf ${FLINK_BASE}.tar.gz ${FLINK_BASE}
 popd
 
+echo
+echo "To create a new binary release:"
+echo "aws s3 cp /opt/flink-1.15.0-rc1.tar.gz s3://prod-dataflo/ops/ec2/latest/flink.tar.gz"
+version=$(date +"%Y-%m-%dT%H:%M:%S")
+echo "aws s3 sync s3://prod-dataflo/ops/ec2/latest/ s3://prod-dataflo/ops/ec2/$version/"
+echo
+echo "Then update python/scripts/setup_ec2/common.sh with BACKEND_BINARIES_VERSION=\"$version\""
+echo
+
 # Restore configuration.
 ln -sf /opt/dataflo/python/ops/flink-config/flink-conf.staging.yaml /opt/${FLINK_BASE}/conf/flink-conf.yaml
