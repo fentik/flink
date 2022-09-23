@@ -149,7 +149,7 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
     public void processElement1(StreamRecord<RowData> element) throws Exception {
         RowData input = element.getValue();
         if (isMinibatchEnabled && !isBatchMode()) {
-            leftRecordStateBuffer.addRecordToBatch(input);
+            leftRecordStateBuffer.addRecordToBatch(input, this.shouldLogInput());
             if (leftRecordStateBuffer.batchNeedsFlush()) {
                 flushRighMinibatch();
             }
@@ -222,7 +222,7 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
     public void processElement2(StreamRecord<RowData> element) throws Exception {
         RowData input = element.getValue();
         if (isMinibatchEnabled && !isBatchMode()) {
-            rightRecordStateBuffer.addRecordToBatch(input);
+            rightRecordStateBuffer.addRecordToBatch(input, this.shouldLogInput());
             if (rightRecordStateBuffer.batchNeedsFlush()) {
                 flushRighMinibatch();
             }
