@@ -173,9 +173,6 @@ public final class JoinRecordStateViews {
         // stores record in the mapping <UK, Record>
         private final MapState<RowData, RowData> recordState;
 
-        /* Last record for key */
-        private final MapState<RowData, RowData> bufferState;
-
         private final KeySelector<RowData, RowData> uniqueKeySelector;
         private final String stateName;
         private final InternalTypeInfo<RowData> uniqueKeyType;
@@ -192,15 +189,11 @@ public final class JoinRecordStateViews {
             checkNotNull(uniqueKeySelector);
             MapStateDescriptor<RowData, RowData> recordStateDesc = new MapStateDescriptor<>(stateName, uniqueKeyType,
                     recordType);
-            MapStateDescriptor<RowData, RowData> bufferStateDesc = new MapStateDescriptor<>(stateName + "-buffer",
-                    uniqueKeyType,
-                    recordType);
 
             if (ttlConfig.isEnabled()) {
                 recordStateDesc.enableTimeToLive(ttlConfig);
             }
             this.recordState = ctx.getMapState(recordStateDesc);
-            this.bufferState = ctx.getMapState(bufferStateDesc);
             this.uniqueKeySelector = uniqueKeySelector;
             this.stateName = stateName;
             this.uniqueKeyType = uniqueKeyType;
