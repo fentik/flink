@@ -45,16 +45,17 @@ import java.util.stream.Stream;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /**
- * Base implementation of KeyedStateBackend. The state can be checkpointed to streams using {@link
+ * Base implementation of KeyedStateBackend. The state can be checkpointed to
+ * streams using {@link
  * #snapshot(long, long, CheckpointStreamFactory, CheckpointOptions)}.
  *
  * @param <K> Type of the key by which state is keyed.
  */
 public abstract class AbstractKeyedStateBackend<K>
         implements CheckpointableKeyedStateBackend<K>,
-                InternalCheckpointListener,
-                TestableKeyedStateBackend<K>,
-                InternalKeyContext<K> {
+        InternalCheckpointListener,
+        TestableKeyedStateBackend<K>,
+        InternalKeyContext<K> {
 
     /** The key serializer. */
     protected final TypeSerializer<K> keySerializer;
@@ -81,7 +82,8 @@ public abstract class AbstractKeyedStateBackend<K>
     protected final TaskKvStateRegistry kvStateRegistry;
 
     /**
-     * Registry for all opened streams, so they can be closed if the task using this backend is
+     * Registry for all opened streams, so they can be closed if the task using this
+     * backend is
      * closed.
      */
     protected CloseableRegistry cancelStreamRegistry;
@@ -165,10 +167,12 @@ public abstract class AbstractKeyedStateBackend<K>
     }
 
     @Override
-    public void notifyCheckpointSubsumed(long checkpointId) throws Exception {}
+    public void notifyCheckpointSubsumed(long checkpointId) throws Exception {
+    }
 
     /**
-     * Closes the state backend, releasing all internal resources, but does not delete any
+     * Closes the state backend, releasing all internal resources, but does not
+     * delete any
      * persistent checkpoint data.
      */
     @Override
@@ -195,7 +199,8 @@ public abstract class AbstractKeyedStateBackend<K>
     }
 
     private void notifyKeySelected(K newKey) {
-        // we prefer a for-loop over other iteration schemes for performance reasons here.
+        // we prefer a for-loop over other iteration schemes for performance reasons
+        // here.
         for (int i = 0; i < keySelectionListeners.size(); ++i) {
             keySelectionListeners.get(i).keySelected(newKey);
         }
@@ -266,8 +271,7 @@ public abstract class AbstractKeyedStateBackend<K>
 
         try (Stream<K> keyStream = getKeys(stateDescriptor.getName(), namespace)) {
 
-            final S state =
-                    partitionStateFactory.get(namespace, namespaceSerializer, stateDescriptor);
+            final S state = partitionStateFactory.get(namespace, namespaceSerializer, stateDescriptor);
 
             keyStream.forEach(
                     (K key) -> {
@@ -300,12 +304,11 @@ public abstract class AbstractKeyedStateBackend<K>
             if (!stateDescriptor.isSerializerInitialized()) {
                 stateDescriptor.initializeSerializerUnlessSet(executionConfig);
             }
-            kvState =
-                    LatencyTrackingStateFactory.createStateAndWrapWithLatencyTrackingIfEnabled(
-                            TtlStateFactory.createStateAndWrapWithTtlIfEnabled(
-                                    namespaceSerializer, stateDescriptor, this, ttlTimeProvider),
-                            stateDescriptor,
-                            latencyTrackingStateConfig);
+            kvState = LatencyTrackingStateFactory.createStateAndWrapWithLatencyTrackingIfEnabled(
+                    TtlStateFactory.createStateAndWrapWithTtlIfEnabled(
+                            namespaceSerializer, stateDescriptor, this, ttlTimeProvider),
+                    stateDescriptor,
+                    latencyTrackingStateConfig);
             keyValueStatesByName.put(stateDescriptor.getName(), kvState);
             publishQueryableStateIfEnabled(stateDescriptor, kvState);
         }
@@ -324,8 +327,10 @@ public abstract class AbstractKeyedStateBackend<K>
     }
 
     /**
-     * TODO: NOTE: This method does a lot of work caching / retrieving states just to update the
-     * namespace. This method should be removed for the sake of namespaces being lazily fetched from
+     * TODO: NOTE: This method does a lot of work caching / retrieving states just
+     * to update the
+     * namespace. This method should be removed for the sake of namespaces being
+     * lazily fetched from
      * the keyed state backend, or being set on the state directly.
      *
      * @see KeyedStateBackend
@@ -382,7 +387,16 @@ public abstract class AbstractKeyedStateBackend<K>
         return keyValueStatesByName.size();
     }
 
-    // TODO remove this once heap-based timers are working with RocksDB incremental snapshots!
+    public void flush() throws Exception {
+        // default no-op
+        // implemented by the RocksDB state backend to flush memtables to solve
+        // a memory problem with memtables not getting flushed for batch backfill
+        // operators
+        throw new Exception("ABSTRACT FAIL");
+    }
+
+    // TODO remove this once heap-based timers are working with RocksDB incremental
+    // snapshots!
     public boolean requiresLegacySynchronousTimerSnapshots(SnapshotType checkpointType) {
         return false;
     }

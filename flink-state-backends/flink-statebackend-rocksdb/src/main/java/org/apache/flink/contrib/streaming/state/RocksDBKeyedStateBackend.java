@@ -70,6 +70,7 @@ import org.apache.flink.util.StateMigrationException;
 
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.ColumnFamilyOptions;
+import org.rocksdb.FlushOptions;
 import org.rocksdb.ReadOptions;
 import org.rocksdb.RocksDB;
 import org.rocksdb.RocksDBException;
@@ -107,8 +108,8 @@ import static org.apache.flink.util.Preconditions.checkState;
  * to disk. Except for the snapshotting, this class should be accessed as if it is not threadsafe.
  *
  * <p>This class follows the rules for closing/releasing native RocksDB resources as described in +
- * <a
- * href="https://github.com/facebook/rocksdb/wiki/RocksJava-Basics#opening-a-database-with-column-families">
+ * <a href=
+ * "https://github.com/facebook/rocksdb/wiki/RocksJava-Basics#opening-a-database-with-column-families">
  * this document</a>.
  */
 public class RocksDBKeyedStateBackend<K> extends AbstractKeyedStateBackend<K> {
@@ -268,7 +269,8 @@ public class RocksDBKeyedStateBackend<K> extends AbstractKeyedStateBackend<K> {
 
         this.ttlCompactFiltersManager = ttlCompactFiltersManager;
 
-        // ensure that we use the right merge operator, because other code relies on this
+        // ensure that we use the right merge operator, because other code relies on
+        // this
         this.columnFamilyOptionsFactory = Preconditions.checkNotNull(columnFamilyOptionsFactory);
 
         this.optionsContainer = Preconditions.checkNotNull(optionsContainer);
@@ -407,13 +409,16 @@ public class RocksDBKeyedStateBackend<K> extends AbstractKeyedStateBackend<K> {
         }
         super.dispose();
 
-        // This call will block until all clients that still acquire access to the RocksDB instance
+        // This call will block until all clients that still acquire access to the
+        // RocksDB instance
         // have released it,
-        // so that we cannot release the native resources while clients are still working with it in
+        // so that we cannot release the native resources while clients are still
+        // working with it in
         // parallel.
         rocksDBResourceGuard.close();
 
-        // IMPORTANT: null reference to signal potential async checkpoint workers that the db was
+        // IMPORTANT: null reference to signal potential async checkpoint workers that
+        // the db was
         // disposed, as
         // working on the disposed object results in SEGFAULTS.
         if (db != null) {
@@ -430,7 +435,8 @@ public class RocksDBKeyedStateBackend<K> extends AbstractKeyedStateBackend<K> {
             List<ColumnFamilyOptions> columnFamilyOptions =
                     new ArrayList<>(kvStateInformation.values().size());
 
-            // RocksDB's native memory management requires that *all* CFs (including default) are
+            // RocksDB's native memory management requires that *all* CFs (including
+            // default) are
             // closed before the
             // DB is closed. See:
             // https://github.com/facebook/rocksdb/wiki/RocksJava-Basics#opening-a-database-with-column-families
@@ -490,7 +496,7 @@ public class RocksDBKeyedStateBackend<K> extends AbstractKeyedStateBackend<K> {
     }
 
     // ------------------------------------------------------------------------
-    //  Getters and Setters
+    // Getters and Setters
     // ------------------------------------------------------------------------
 
     public int getKeyGroupPrefixBytes() {
@@ -517,6 +523,11 @@ public class RocksDBKeyedStateBackend<K> extends AbstractKeyedStateBackend<K> {
     @VisibleForTesting
     boolean isDisposed() {
         return this.disposed;
+    }
+
+    @Override
+    public void flush() throws Exception {
+        db.flush(new FlushOptions());
     }
 
     /**
