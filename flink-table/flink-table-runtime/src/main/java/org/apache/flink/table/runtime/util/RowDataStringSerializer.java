@@ -47,7 +47,7 @@ public class RowDataStringSerializer implements Serializable {
                 .toArray(LogicalType[]::new);
         String[] fieldNames = type.getFieldNames().toArray(new String[0]);
         int rowArity = type.getFieldCount();
-        String rowString = "";
+        String rowString = "[" + row.getRowKind().toString() + "] {";
         for (int i = 0; i < rowArity; i++) {
             String value = "";
             if (row.isNullAt(i)) {
@@ -77,7 +77,7 @@ public class RowDataStringSerializer implements Serializable {
 
                         case CHAR:
                         case VARCHAR:
-                            value = row.getString(i).toString();
+                            value = "'" + row.getString(i).toString() + "'";
                             break;
 
                         case FLOAT:
@@ -120,7 +120,7 @@ public class RowDataStringSerializer implements Serializable {
                             break;
 
                         case MULTISET:
-                            value = "[MULTISET TYPE]";
+                            value = "[MULTISET]";
                             break;
 
                         default:
@@ -131,7 +131,7 @@ public class RowDataStringSerializer implements Serializable {
             String field = fieldNames[i] + "=" + value;
             rowString = rowString + field + (i == rowArity - 1 ? "" : ", ");
         }
-        return rowString;
+        return rowString + "}";
     }
 
     private String dateToString(int days) {
