@@ -180,6 +180,16 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
         return getRuntimeContext().getJobId() + " " + getRuntimeContext().getTaskName();
     }
 
+    private boolean equalsIgnoreRowKind(RowData row, RowData input) {
+        // we need to do a comparison that ignores row kind in cases
+        // where we're looking at our internal state against the input
+        RowKind inputRowKind = input.getRowKind();
+        input.setRowKind(row.getRowKind());
+        boolean isEqual = equaliser.equals(row, input);
+        input.setRowKind(inputRowKind);
+        return isEqual;
+    }
+
     public void emitStateAndSwitchToStreaming(Context ctx, Collector<RowData> out,
             KeyedStateBackend<RowData> be) throws Exception {
         if (isStreamMode) {
@@ -333,7 +343,7 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
                     // comparing record by equaliser
                     Iterator<RowData> inputsIter = inputs.iterator();
                     while (inputsIter.hasNext()) {
-                        if (equaliser.equals(inputsIter.next(), input)) {
+                        if (equalsIgnoreRowKind(inputsIter.next(), input)) {
                             inputsIter.remove();
                             break;
                         }
@@ -496,7 +506,7 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
                     Iterator<RowData> inputIter = inputs.iterator();
                     while (inputIter.hasNext() && isInRankEnd(currentRank)) {
                         RowData currentRow = inputIter.next();
-                        if (!findsSortKey && equaliser.equals(currentRow, inputRow)) {
+                        if (!findsSortKey && equalsIgnoreRowKind(currentRow, inputRow)) {
                             prevRow = currentRow;
                             findsSortKey = true;
                             inputIter.remove();
@@ -574,7 +584,7 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
                     Iterator<RowData> inputIter = inputs.iterator();
                     while (inputIter.hasNext() && isInRankEnd(nextRank)) {
                         RowData prevRow = inputIter.next();
-                        if (!findsSortKey && equaliser.equals(prevRow, inputRow)) {
+                        if (!findsSortKey && equalsIgnoreRowKind(prevRow, inputRow)) {
                             if (isStreamMode) {
                                 collectDelete(out, prevRow, nextRank);
                             }
