@@ -446,20 +446,23 @@ public abstract class CommonExecSink extends ExecNodeBase<Object>
         GeneratedRecordEqualiser equaliser =
                 new EqualiserCodeGenerator(physicalRowType)
                         .generateRecordEqualiser("DedupSinkMaterializeEqualiser");
-        DedupSinkUpsertMaterializer operator =
-                new DedupSinkUpsertMaterializer(
-                        StateConfigUtil.createTtlConfig(
-                                config.get(ExecutionConfigOptions.IDLE_STATE_RETENTION).toMillis()),
-                        InternalTypeInfo.of(physicalRowType),
-                        equaliser,
-                        config.get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL)
-                        );
         final String[] fieldNames = physicalRowType.getFieldNames().toArray(new String[0]);
         final List<String> pkFieldNames =
                 Arrays.stream(primaryKeys)
                         .mapToObj(idx -> fieldNames[idx])
                         .collect(Collectors.toList());
-
+        RowDataKeySelector keySelector =
+                KeySelectorUtil.getRowDataSelector(
+                        primaryKeys, InternalTypeInfo.of(physicalRowType));
+        DedupSinkUpsertMaterializer operator =
+                        new DedupSinkUpsertMaterializer(
+                                StateConfigUtil.createTtlConfig(
+                                        config.get(ExecutionConfigOptions.IDLE_STATE_RETENTION).toMillis()),
+                                InternalTypeInfo.of(physicalRowType),
+                                equaliser,
+                                keySelector,
+                                config.get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL)
+                                );
         OneInputTransformation<RowData, RowData> materializeTransform =
                 ExecNodeUtil.createOneInputTransformation(
                         inputTransform,
@@ -473,9 +476,6 @@ public abstract class CommonExecSink extends ExecNodeBase<Object>
                         operator,
                         inputTransform.getOutputType(),
                         sinkParallelism);
-        RowDataKeySelector keySelector =
-                KeySelectorUtil.getRowDataSelector(
-                        primaryKeys, InternalTypeInfo.of(physicalRowType));
         materializeTransform.setStateKeySelector(keySelector);
         materializeTransform.setStateKeyType(keySelector.getProducedType());
         return materializeTransform;

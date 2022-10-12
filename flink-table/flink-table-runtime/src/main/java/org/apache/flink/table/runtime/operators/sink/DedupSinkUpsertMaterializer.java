@@ -19,57 +19,73 @@
 package org.apache.flink.table.runtime.operators.sink;
 
 import org.apache.flink.api.common.state.StateTtlConfig;
-import org.apache.flink.api.common.state.ValueState;
-import org.apache.flink.api.common.state.ValueStateDescriptor;
-import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.common.typeutils.base.ListSerializer;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.TimestampedCollector;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.types.RowKind;
+import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.data.util.RowDataUtil;
 import org.apache.flink.table.runtime.generated.GeneratedRecordEqualiser;
 import org.apache.flink.table.runtime.generated.RecordEqualiser;
 import org.apache.flink.table.runtime.operators.TableStreamOperator;
-import org.apache.flink.types.RowKind;
-import org.apache.flink.util.ExceptionUtils;
-import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.api.java.typeutils.ListTypeInfo;
-import org.apache.flink.api.java.typeutils.TupleTypeInfo;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
-import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.streaming.api.watermark.Watermark;
+import org.apache.flink.table.runtime.keyselector.RowDataKeySelector;
+import org.apache.flink.api.java.functions.KeySelector;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
-
-import org.apache.flink.table.types.DataType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
-//import org.apache.flink.table.types.utils.TypeConversions;
-
-import static org.apache.flink.types.RowKind.DELETE;
-import static org.apache.flink.types.RowKind.INSERT;
-import static org.apache.flink.types.RowKind.UPDATE_AFTER;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Iterator;
 
 import org.apache.flink.table.runtime.util.RowDataStringSerializer;
 
 /**
- * An operator that maintains incoming records in state corresponding to the
- * upsert keys and
- * generates an upsert view for the downstream operator.
+ * It's not 100% obvious what the various errors the original SinkUpsertMaterializer
+ * is meant to protect. However, for our purposes, it's an extremely expensive operator
+ * as coded (it maintains a complete copy to the output dataset), and also runs into
+ * some serious performance issues as coded.
+ * 
+ * On the performance side, the most glaring issue is the following: we see a number of
+ * large (10k+) duplicate records come in. These duplicate records fill up a memtable
+ * in our RocksDB backend very quickly. And the behavior we see is that the Sink gets into
+ * a state where it's continously flushing memtables resulting in a terrible throughput.
+ * 
+ * In our copy of the Sink materializer, we are going to handle the following case which
+ * we see with aggregates and rank function:
+ *   +U ['Health', 'Granite Used Pizza', '1969.65']
+ *   +U ['Health', 'Granite Used Pizza', '1969.65']
+ *   -U ['Health', 'Granite Used Pizza', '1969.65']
+ *   -U ['Health', 'Granite Used Pizza', '1969.65']
+ * 
+ * As you can see in the history, we get multiple "out of order" records for the same
+ * key. More specifically, instead of +U/-U pairs, we see mutliple updates followed by
+ * multiple retractions. If we were to simply forward such cases to the final sink
+ * destination, we would produce an incorrect result. Imagine the following history:
+ * 
+ * For example, consider the following history:
+ *   +U ['Health', 'Granite Used Pizza', '1969.65']
+ *   +U ['Health', 'Granite Used Pizza', '1969.65']
+ *   -U ['Health', 'Granite Used Pizza', '1969.65']
+ * 
+ * What second update precedes the retraction for the first row. In such a case, we would
+ * erronesouly delete the record from destination because the delete is the last message
+ * the we would process. The original SinkMaterializer handled this case by keeping a history
+ * of all row versions for a key (resulting in a huge state and the performance issue desibed
+ * above).
+ * 
+ * The reordering issue is transient. In our implementation, instead of persisting the complete
+ * sink state in our durable backend, we will instead use an in-memory buffer to cache duplicate
+ * records like this. The code assumes that such reordering cannot occur between mini-batch
+ * watermarks, so we will use the mini-batch barrier imlementation to flush our state.
  *
- * <ul>
- * <li>Adds an insertion to state and emits it with updated {@link RowKind}.
- * <li>Applies a deletion to state.
- * <li>Emits a deletion with updated {@link RowKind} iff affects the last record
- * or the state is
- * empty afterwards. A deletion to an already updated record is swallowed.
- * </ul>
  */
+
 public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
         implements OneInputStreamOperator<RowData, RowData> {
 
@@ -77,70 +93,74 @@ public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
 
     private static final Logger LOG = LoggerFactory.getLogger(DedupSinkUpsertMaterializer.class);
 
-    private static final String STATE_CLEARED_WARN_MSG = "The state is cleared because of state ttl. This will result in incorrect result. "
-            + "You can increase the state ttl to avoid this.";
-
-    private final StateTtlConfig ttlConfig;
     private final InternalTypeInfo<RowData> recordType;
     private final GeneratedRecordEqualiser generatedEqualiser;
     private final RowDataStringSerializer rowStringSerializer;
     private final boolean isBatchBackfillEnabled;
-    private int maxValueLength = 1;
     private boolean isStreaming;
-
+    private final LinkedHashMap<RowData, List<RowData>> buffer;
     private transient RecordEqualiser equaliser;
+    private final KeySelector<RowData, RowData> keySelector;
 
-    // Buffer of emitted insertions on which deletions will be applied first.
-    // The row kind might be +I or +U and will be ignored when applying the
-    // deletion.
-    private transient ValueState<List<Tuple2<RowData, Integer>>> state;
     private transient TimestampedCollector<RowData> collector;
 
     public DedupSinkUpsertMaterializer(
             StateTtlConfig ttlConfig,
             InternalTypeInfo<RowData> recordType,
             GeneratedRecordEqualiser generatedEqualiser,
+            RowDataKeySelector keySelector,
             boolean isBatchBackfillEnabled) {
-        this.ttlConfig = ttlConfig;
         this.recordType = recordType;
         this.generatedEqualiser = generatedEqualiser;
         this.rowStringSerializer = new RowDataStringSerializer(recordType.toRowType());
         this.isBatchBackfillEnabled = isBatchBackfillEnabled;
+        this.keySelector = keySelector;
         this.isStreaming = isBatchBackfillEnabled ? false : true;
+        this.buffer = new LinkedHashMap<>();
     }
 
     @Override
     public void open() throws Exception {
         super.open();
         this.equaliser = generatedEqualiser.newInstance(getRuntimeContext().getUserCodeClassLoader());
-        ListTypeInfo<Tuple2<RowData, Integer>> valueTypeInfo = new ListTypeInfo<>(
-                new TupleTypeInfo(recordType, Types.INT));
-        ValueStateDescriptor<List<Tuple2<RowData, Integer>>> descriptor = new ValueStateDescriptor<>("values",
-                valueTypeInfo);
-        if (ttlConfig.isEnabled()) {
-            descriptor.enableTimeToLive(ttlConfig);
-        }
-        this.state = getRuntimeContext().getState(descriptor);
         this.collector = new TimestampedCollector<>(output);
+    }
+
+    private void flushBatch() throws Exception {
+        for (Map.Entry<RowData, List<RowData>> entry : buffer.entrySet()) {
+            // emit the last accumulated message per unique key in a batch
+            List<RowData> values = entry.getValue();
+            RowData lastRow = values.get(values.size() - 1);
+            LOG.debug("[SubTask Id: {}] EMIT last in batch {} mode {}",
+                    getRuntimeContext().getIndexOfThisSubtask(), 
+                    rowStringSerializer.asString(lastRow),
+                    isStreaming ? "STREAMING" : "BATCH BACKFILL");
+            collector.collect(lastRow);
+        }
+        buffer.clear();
     }
 
     @Override
     public void processWatermark(Watermark mark) throws Exception {
-        // we don't do any batch processing in this operator, we're simply looking at
-        // the state
-        // for diagnostic purposes
-        if (!isStreaming) {
-            if (mark.getTimestamp() == Watermark.MAX_WATERMARK.getTimestamp()) {
-                isStreaming = true;
-                maxValueLength = 1;
-            }
+        if (isStreaming) {
+            LOG.debug("[SubTask Id: {}] watermark {}",getRuntimeContext().getIndexOfThisSubtask(), mark);
+            flushBatch();
         }
         super.processWatermark(mark);
     }
 
     @Override
-    public void processElement(StreamRecord<RowData> element) throws Exception {
-        final RowData row = element.getValue();
+    public void processElement(StreamRecord<RowData> input) throws Exception {
+        BinaryRowData row = (BinaryRowData) input.getValue();
+        RowKind origRowKind = row.getRowKind();
+
+        if (this.shouldLogInput()) {
+            LOG.info("[SubTask Id: {}] processing input {} mode {}",
+                    getRuntimeContext().getIndexOfThisSubtask(), 
+                    rowStringSerializer.asString(row),
+                    isStreaming ? "STREAMING" : "BATCH BACKFILL");
+        }
+
         if (!isStreaming) {
             // while not in streaming mode, we cannot experience the reordering
             // issue this operator is meant to address, so simply emit the input
@@ -149,104 +169,60 @@ public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
             return;
         }
 
-        List<Tuple2<RowData, Integer>> values = state.value();
-        if (values == null) {
-            values = new ArrayList<>(2);
-        }
-        if (this.shouldLogInput()) {
-            LOG.info("[SubTask Id: (" + getRuntimeContext().getIndexOfThisSubtask() + ")]: Processing input ("
-                    + row.getRowKind() + ") with "
-                    + values.size() + " values : " + rowStringSerializer.asString(row));
-        }
-        switch (row.getRowKind()) {
-            case INSERT:
-            case UPDATE_AFTER:
-                if (values.size() > maxValueLength) {
-                    maxValueLength = values.size();
-                    LOG.info("DEDUP new maxValueLength {} for row {} iStreaming {}", maxValueLength,
-                            rowStringSerializer.asString(row), isStreaming);
-                }
-                row.setRowKind(values.isEmpty() ? INSERT : UPDATE_AFTER);
-                // Add a new row if it doesn't exist, otherwise update the tuple with
-                // a new count to remove duplicates
-                boolean seen = false;
-                int i = 0;
-                for (Tuple2<RowData, Integer> entry : values) {
-                    RowData currRow = entry.f0;
-                    Integer count = entry.f1;
-                    if (equaliser.equals(currRow, row)) {
-                        // We found a duplcate row in the state, which means we do not
-                        // want to emit it downstream and we bump up its count instead
-                        entry.f1 = new Integer(count + 1);
-                        values.set(i, entry);
-                        seen = true;
-                        break;
-                    }
-                    i++;
-                }
-                if (!seen) {
-                    Tuple2<RowData, Integer> record = new Tuple2(row, new Integer(1));
-                    values.add(record);
-                    collector.collect(row);
-                }
-                break;
+        // copy out row for buffering since its reused
+        row = row.copy();
 
-            case UPDATE_BEFORE:
-            case DELETE:
-                final int lastIndex = values.size() - 1;
-                final int index = removeFirst(values, row);
-                if (index == -1) {
-                    // XXX(sergei): not a useful error message, suppress since it spams the log
-                    LOG.debug(STATE_CLEARED_WARN_MSG);
-                    return;
-                }
-                if (index == -2) {
-                    // updated duplicate count, update state but do not emit
+        RowData key = keySelector.getKey(row);
+        List<RowData> values = buffer.get(key);
+
+        if (values == null) {
+            if (!RowDataUtil.isAccumulateMsg(row)) {
+                // we have no accumulated state for this retraction, so we just
+                // pass it through as-is without buffering since we do not
+                // expect to see retractions preceding accumulations for the
+                // edge case this operation is meant to address
+                LOG.debug("[SubTask Id: {}] EMIT retraction for {} mode {}",
+                    getRuntimeContext().getIndexOfThisSubtask(), 
+                    rowStringSerializer.asString(row),
+                    isStreaming ? "STREAMING" : "BATCH BACKFILL");
+                collector.collect(row);
+                return;
+            } else {
+                values = new ArrayList<RowData>();
+                buffer.put(key, values);
+            }
+        }
+
+        if (RowDataUtil.isAccumulateMsg(row)) {
+            // always add accumulated messages to the buffer
+            values.add(row);
+        } else {
+            // retraction, find and remove the matching row
+            Iterator<RowData> iter = values.iterator();
+            boolean removed = false;
+            while (iter.hasNext()) {
+                RowData elementRow = iter.next();
+                // we need to make sure that row kind matches for comparison
+                row.setRowKind(elementRow.getRowKind());
+                if (equaliser.equals(elementRow, row)) {
+                    iter.remove();
+                    removed = true;
                     break;
                 }
-                if (values.isEmpty()) {
-                    // Delete this row
-                    row.setRowKind(DELETE);
-                    collector.collect(row);
-                } else if (index == lastIndex) {
-                    // Last row has been removed, update to the second last one
-                    Tuple2<RowData, Integer> entry = values.get(values.size() - 1);
-                    RowData latestRow = entry.f0;
-                    latestRow.setRowKind(UPDATE_AFTER);
-                    collector.collect(latestRow);
-                }
-                break;
-        }
-
-        if (values.isEmpty()) {
-            state.clear();
-        } else {
-            state.update(values);
-        }
-    }
-
-    private int removeFirst(List<Tuple2<RowData, Integer>> values, RowData remove) {
-        final Iterator<Tuple2<RowData, Integer>> iterator = values.iterator();
-        int i = 0;
-        while (iterator.hasNext()) {
-            Tuple2<RowData, Integer> entry = iterator.next();
-            RowData row = entry.f0;
-            Integer count = entry.f1;
-            // Ignore kind during comparison
-            remove.setRowKind(row.getRowKind());
-            if (equaliser.equals(row, remove)) {
-                if (count == 1) {
-                    iterator.remove();
-                    return i;
-                } else {
-                    // update count only, do not trigger a re-emit
-                    entry.f1 = new Integer(count - 1);
-                    values.set(i, entry);
-                    return -2;
-                }
             }
-            i++;
+
+            if (!removed) {
+                row.setRowKind(origRowKind);
+                LOG.warn("[SubTask Id: {}] no matching row found to retract {}",
+                    getRuntimeContext().getIndexOfThisSubtask(), 
+                    rowStringSerializer.asString(row));
+            }
+
+            if (values.size() == 0) {
+                // clear the buffer for this key if there are no elements
+                // to keep the memory footprint down
+                buffer.remove(key);
+            }
         }
-        return -1;
     }
 }
