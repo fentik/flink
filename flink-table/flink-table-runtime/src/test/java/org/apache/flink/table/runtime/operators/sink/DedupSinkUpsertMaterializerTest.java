@@ -65,7 +65,7 @@ public class DedupSinkUpsertMaterializerTest {
     @Test
     public void test() throws Exception {
         DedupSinkUpsertMaterializer materializer = new DedupSinkUpsertMaterializer(ttlConfig, recordType, equaliser,
-                false);
+                keySelector, false);
         KeyedOneInputStreamOperatorTestHarness<RowData, RowData, RowData> testHarness = new KeyedOneInputStreamOperatorTestHarness<>(
                 materializer, keySelector, keySelector.getProducedType());
 
