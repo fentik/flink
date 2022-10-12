@@ -1,7 +1,7 @@
 package org.apache.flink.table.runtime.operators.join.stream.minibatch;
 
 import java.util.Map;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 
 import org.apache.flink.api.common.functions.RuntimeContext;
 import org.apache.flink.api.common.state.MapState;
@@ -32,7 +32,7 @@ public class MiniBatchJoinBuffer {
      * On -D/-U decrement
      * Then emit count retracts if negative or accumulate if positive
      */
-    private final HashMap<RowData, Integer> buffer;
+    private final LinkedHashMap<RowData, Integer> buffer;
     private final KeySelector<RowData, RowData> keySelector;
     private final InternalTypeInfo<RowData> recordType;
     private final RowDataStringSerializer recordStringSerializer;
@@ -58,7 +58,7 @@ public class MiniBatchJoinBuffer {
         this.totalInputRecords = 0;
         this.totalOutputRecords = 0;
         this.isSamplingEnabled = false;
-        this.buffer = new HashMap<>();
+        this.buffer = new LinkedHashMap<>();
         this.keySelector = keySelector;
         this.recordType = recordType;
         this.stateName = stateName;
