@@ -160,7 +160,7 @@ public class StreamExecLocalGroupAggregate extends StreamExecAggregateBase {
         final GeneratedAggsHandleFunction aggsHandler =
                 generator.generateAggsHandler("GroupAggsHandler", aggInfoList);
         final MiniBatchLocalGroupAggFunction aggFunction =
-                new MiniBatchLocalGroupAggFunction(aggsHandler);
+                new MiniBatchLocalGroupAggFunction(inputRowType, aggsHandler);
 
         final RowDataKeySelector selector =
                 KeySelectorUtil.getRowDataSelector(

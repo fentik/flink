@@ -248,6 +248,7 @@ public class StreamExecGlobalGroupAggregate extends StreamExecAggregateBase {
                             localAggsHandler,
                             globalAggsHandler,
                             recordEqualiser,
+                            inputRowType,
                             globalAccTypes,
                             indexOfCountStar,
                             generateUpdateBefore,
