@@ -7,6 +7,7 @@
 set -ex
 
 FLINK_DIR=build-target
+FLINK_BASE=flink-1.15.0-rc1
 LIB_DIR="$FLINK_DIR/lib/"
 OPT_DIR="$FLINK_DIR/opt/"
 GIT_SHA=$(git log -n 1 --format="%H" .)
@@ -29,15 +30,19 @@ cp ./flink-filesystems/flink-s3-fs-presto/target/flink-s3-fs-presto-1.15.0.jar $
 
 if [ "$1" == "--package" ]; then
     # Build a Flink binary.
+    temp_dir=$(mktemp -d)
     echo "Building Flink tarball"
-    rm -f /tmp/flink.tar.gz
-    pushd $FLINK_DIR
-    tar --exclude conf/flink-conf.yaml -zchf /tmp/flink.tar.gz .
+    # Note: we want the tarball to start with ./$FLINK_BASE/.
+    mkdir $temp_dir/target
+    ln -s $PWD/$FLINK_DIR $temp_dir/target/$FLINK_BASE
+    pushd $temp_dir/target
+    tar --exclude conf/flink-conf.yaml -zchf ../flink.tar.gz .
     popd
     S3_PATH="s3://prod-dataflo/ops/ec2/flink/$GIT_SHA/flink.tar.gz"
     S3_PATH_LATEST="s3://prod-dataflo/ops/ec2/flink/latest/flink.tar.gz"
-    aws s3 cp /tmp/flink.tar.gz $S3_PATH
-    aws s3 cp /tmp/flink.tar.gz $S3_PATH_LATEST
+    aws s3 cp $temp_dir/flink.tar.gz $S3_PATH
+    aws s3 cp $temp_dir/flink.tar.gz $S3_PATH_LATEST
+    rm -rf $temp_dir
     echo "To use the new binary, update python/scripts/setup_ec2/common.sh with":
     echo "FLINK_BINARY_PATH=$S3_PATH"
 fi
