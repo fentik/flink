@@ -367,7 +367,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         if (this.shouldLogInput()) {
             RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(
                     inputIsLeft ? leftType : rightType);
-            LOG.info("Processing input row: " + rowStringSerializer.asString(input));
+            LOG.info("Processing input row: " + rowStringSerializer.asString(input) + " (original RowKind: " + inputRowKind + ")");
         }
         if (isAccumulateMsg) { // record is accumulate
             if (inputIsOuter) { // input side is outer
