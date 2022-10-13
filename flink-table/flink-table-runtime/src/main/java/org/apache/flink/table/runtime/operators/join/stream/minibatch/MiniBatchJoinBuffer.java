@@ -134,7 +134,7 @@ public class MiniBatchJoinBuffer {
                 ? 0
                 : (totalInputRecords - totalOutputRecords) / (double) totalInputRecords
                 ;
-            LOG.info("MINIBATCH {} emitted {} records out of {} recieved (total {} out and {} in effectiveness ratio {})",
+            LOG.debug("MINIBATCH {} emitted {} records out of {} recieved (total {} out and {} in effectiveness ratio {})",
                     stateName, currentEmittedCount, currentBatchCount,
                     totalOutputRecords, totalInputRecords,
                     String.format("%.2f", factor));
