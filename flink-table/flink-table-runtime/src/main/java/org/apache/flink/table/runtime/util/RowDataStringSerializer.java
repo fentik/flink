@@ -12,6 +12,7 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.DecimalType;
 import org.apache.flink.table.types.logical.TimestampType;
+import org.apache.flink.table.types.logical.LocalZonedTimestampType;
 import org.apache.flink.table.types.utils.TypeConversions;
 
 import java.io.Serializable;
@@ -55,6 +56,7 @@ public class RowDataStringSerializer implements Serializable {
             } else {
                 DecimalType decimalType;
                 TimestampType timestampType;
+                LocalZonedTimestampType localZonedTimestampType;
 
                 switch (fieldTypes[i].getTypeRoot()) {
                         case NULL:
@@ -98,8 +100,8 @@ public class RowDataStringSerializer implements Serializable {
                             break;
 
                         case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                            timestampType = (TimestampType) fieldTypes[i];
-                            value = timestampWithLocalTimeZoneToString(row.getTimestamp(i, timestampType.getPrecision()));
+                            localZonedTimestampType = (LocalZonedTimestampType) fieldTypes[i];
+                            value = timestampWithLocalTimeZoneToString(row.getTimestamp(i, localZonedTimestampType.getPrecision()));
                             break;
 
                         case DECIMAL:
