@@ -74,10 +74,6 @@ public class PushCalcsPastChangelogNormalizeRule
         final StreamPhysicalCalc calc = call.rel(0);
         final StreamPhysicalChangelogNormalize changelogNormalize = call.rel(1);
 
-        if (fired) {
-            LOG.info("rule already fired, return");
-            return;
-        }
         LOG.info("RULE matched uniqueKeys() {} input {}", changelogNormalize.uniqueKeys(), changelogNormalize.getRowType());
 
         // Create a union list of fields between the projected columns and unique keys
@@ -121,6 +117,7 @@ public class PushCalcsPastChangelogNormalizeRule
 
         if (allColumnsNeeded) {
             // all columns are needed, no need to push a new projection
+            call.transformTo(calc);
             return;
         }
 
@@ -134,10 +131,6 @@ public class PushCalcsPastChangelogNormalizeRule
                 inputRemap[prev] = -1;
             }
         }
-
-
-        fired = true;
-
 
         // Construct a new ChangelogNormalize which has the new projection pushed into it
         StreamPhysicalChangelogNormalize newChangelogNormalize =
