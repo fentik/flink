@@ -84,7 +84,6 @@ public class PushCalcsPastChangelogNormalizeRule
             isColumnNeeded[pidx] = true;
         }
 
-
         final RexProgram program = calc.getProgram();
 
         // column references in the projection list
@@ -115,7 +114,6 @@ public class PushCalcsPastChangelogNormalizeRule
 
         if (allColumnsNeeded) {
             // all columns are needed, no need to push a new projection
-            call.transformTo(calc);
             return;
         }
 
@@ -135,7 +133,7 @@ public class PushCalcsPastChangelogNormalizeRule
                 pushNeededColumnsThroughChangelogNormalize(call, isColumnNeeded);
 
         StreamPhysicalCalc newCalc = projectCopyWithRemap(
-            call.builder(), newChangelogNormalize.getInput(), calc, inputRemap);
+            call.builder(), newChangelogNormalize, calc, inputRemap);
 
         if (newCalc.getProgram().isTrivial()) {
             call.transformTo(newChangelogNormalize);
@@ -149,7 +147,6 @@ public class PushCalcsPastChangelogNormalizeRule
         final StreamPhysicalChangelogNormalize changelogNormalize = call.rel(1);
         final StreamPhysicalExchange exchange = call.rel(2);
 
- 
         final StreamPhysicalCalc pushedProjectionCalc =
                 projectWithNeededColumns(
                         call.builder(), exchange.getInput(), isColumnNeeded);
@@ -196,7 +193,6 @@ public class PushCalcsPastChangelogNormalizeRule
 
         final RexProgramBuilder programBuilder =
             new RexProgramBuilder(newInput.getRowType(), relBuilder.getRexBuilder());
-        RelNode origInput = origCalc.getInput();
 
         RexShuttle remapVisitor = new RexShuttle() {
             @Override
@@ -226,7 +222,7 @@ public class PushCalcsPastChangelogNormalizeRule
                 newInput.getTraitSet(),
                 newInput,
                 newProgram,
-                newProgram.getOutputRowType());
+                origCalc.getProgram().getOutputRowType());
     }
 
     // ---------------------------------------------------------------------------------------------
