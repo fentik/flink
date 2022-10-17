@@ -74,8 +74,6 @@ public class PushCalcsPastChangelogNormalizeRule
         final StreamPhysicalCalc calc = call.rel(0);
         final StreamPhysicalChangelogNormalize changelogNormalize = call.rel(1);
 
-        LOG.info("RULE matched uniqueKeys() {} input {}", changelogNormalize.uniqueKeys(), changelogNormalize.getRowType());
-
         // Create a union list of fields between the projected columns and unique keys
         final RelDataType inputRowType = changelogNormalize.getRowType();
         final boolean[] isColumnNeeded = new boolean[inputRowType.getFieldCount()];
@@ -139,7 +137,11 @@ public class PushCalcsPastChangelogNormalizeRule
         StreamPhysicalCalc newCalc = projectCopyWithRemap(
             call.builder(), newChangelogNormalize.getInput(), calc, inputRemap);
 
-        call.transformTo(newCalc);
+        if (newCalc.getProgram().isTrivial()) {
+            call.transformTo(newChangelogNormalize);
+        } else {
+            call.transformTo(newCalc);
+        }
     }
 
     private StreamPhysicalChangelogNormalize pushNeededColumnsThroughChangelogNormalize(
