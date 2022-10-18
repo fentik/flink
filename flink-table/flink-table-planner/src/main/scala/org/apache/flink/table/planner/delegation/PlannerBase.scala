@@ -63,6 +63,7 @@ import org.apache.flink.table.planner.utils.JavaScalaConversionUtil.{toJava, toS
 import org.apache.flink.table.runtime.generated.CompileUtils
 import org.apache.flink.table.sinks.TableSink
 import org.apache.flink.table.types.utils.LegacyTypeInfoDataTypeConverter
+import org.apache.flink.table.planner.plan.rules.physical.stream.PushCalcsPastChangelogNormalize
 
 import java.lang.{Long => JLong}
 import java.util
@@ -498,7 +499,8 @@ abstract class PlannerBase(
         translateToRel(modifyOperation)
       case o => throw new TableException(s"Unsupported operation: ${o.getClass.getCanonicalName}")
     }
-    val optimizedRelNodes = optimize(sinkRelNodes)
+    // val optimizedRelNodes = optimize(sinkRelNodes)
+    val optimizedRelNodes = PushCalcsPastChangelogNormalize.optimize(optimize(sinkRelNodes))
     val execGraph = translateToExecNodeGraph(optimizedRelNodes)
 
     val transformations = translateToPlan(execGraph)

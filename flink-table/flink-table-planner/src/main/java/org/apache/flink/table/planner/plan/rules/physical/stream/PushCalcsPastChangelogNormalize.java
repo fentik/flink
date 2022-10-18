@@ -22,6 +22,8 @@ import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamPhysicalCalc;
 import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamPhysicalChangelogNormalize;
 import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamPhysicalExchange;
+import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamPhysicalTableSourceScan;
+import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamPhysicalDropUpdateBefore;
 
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
@@ -40,6 +42,10 @@ import org.apache.calcite.rex.RexUtil;
 import org.apache.calcite.rex.RexShuttle;
 import org.apache.calcite.tools.RelBuilder;
 import org.apache.calcite.util.Pair;
+import org.apache.calcite.rel.RelVisitor;
+import org.checkerframework.checker.nullness.qual.Nullable;
+import org.apache.flink.table.planner.plan.utils.FlinkRelOptUtil;
+
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -48,6 +54,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.Stack;
+import java.util.HashMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,19 +65,148 @@ import static org.apache.flink.table.planner.plan.utils.RexNodeExtractor.extract
 /**
  */
 @Internal
-public class PushCalcsPastChangelogNormalizeRule
-        extends RelRule<PushCalcsPastChangelogNormalizeRule.Config> {
+public class PushCalcsPastChangelogNormalize {
 
-    private static final Logger LOG = LoggerFactory.getLogger(PushCalcsPastChangelogNormalizeRule.class);
-    public static final RelOptRule INSTANCE = Config.EMPTY.as(Config.class).onMatch().toRule();
+    private static final Logger LOG = LoggerFactory.getLogger(PushCalcsPastChangelogNormalize.class);
 
-    boolean fired = false;
-
-    public PushCalcsPastChangelogNormalizeRule(Config config) {
-        super(config);
+    public PushCalcsPastChangelogNormalize() {
     }
 
-    @Override
+    static class PushCalcsVisitor extends RelVisitor {
+        private Stack<RelNode> stack = new Stack<RelNode>();
+        private HashMap<StreamPhysicalTableSourceScan, boolean[]> usedColumnsBySource = new HashMap<>();
+
+        public PushCalcsVisitor() {
+            super();
+        }
+
+        @Override
+        public void visit(RelNode node, int ordinal, @Nullable RelNode parent) {
+            stack.push(node);
+            if (node instanceof StreamPhysicalTableSourceScan) {
+                StreamPhysicalTableSourceScan source = (StreamPhysicalTableSourceScan) node;
+                boolean[] usedColumns = findUsedColumns(source, stack);
+                boolean[] cachedUsedColumns;
+                if (usedColumnsBySource.containsKey(source)) {
+                    cachedUsedColumns = usedColumnsBySource.get(source);
+                } else {
+                    cachedUsedColumns = new boolean[usedColumns.length];
+                    usedColumnsBySource.put(source, cachedUsedColumns);
+                }
+                for (int i = 0; i < usedColumns.length; i++) {
+                    if (usedColumns[i]) {
+                        cachedUsedColumns[i] = true;
+                    }
+                }
+                LOG.info("XXX source {} cachedUsed {}", source, cachedUsedColumns);
+            }
+            super.visit(node, ordinal, parent);
+            stack.pop();
+        }
+
+        private ArrayList<RelNode> pathMatches(Object[] matchConfig, Stack<RelNode> path) {
+            if (path.size() < matchConfig.length) {
+                return null;
+            }
+
+            ArrayList<RelNode> match = new ArrayList<RelNode>(matchConfig.length);
+            path = (Stack<RelNode>) path.clone();
+            RelNode node = null;
+            for (int i = 0; i < matchConfig.length; i++) {
+                node = path.pop();
+                if (node.getClass() != matchConfig[i]) {
+                    return null;
+                }
+                match.add(node);
+            }
+
+            return match;
+        }
+
+        private void computeUsedColumns(StreamPhysicalCalc calc, StreamPhysicalChangelogNormalize changelogNormalize, boolean[] usedColumns) {
+            // Create a union list of fields between the projected columns and unique keys
+            final RelDataType inputRowType = changelogNormalize.getRowType();
+
+            // unique key indexes
+            for (int pidx : changelogNormalize.uniqueKeys()) {
+                usedColumns[pidx] = true;
+            }
+
+            final RexProgram program = calc.getProgram();
+
+            // column references in the projection list
+            for (RexLocalRef expr : program.getProjectList()) {
+                // projections can be simple column identieties but they can also contain
+                // expressions, so we need to have a more robust way of extracting all
+                // column references from the projection list with the helper below
+                for (int ref : extractRefInputFields(Collections.singletonList(program.expandLocalRef(expr)))) {
+                    usedColumns[ref] = true;
+                }
+            }
+
+            // column references in any of the predicates
+            RexLocalRef condition = program.getCondition();
+            if (condition != null) {
+                for (int ref : extractRefInputFields(Collections.singletonList(program.expandLocalRef(condition)))) {
+                    usedColumns[ref] = true;
+                }
+            }
+        }
+
+        /**
+         * Walk up the physical plan tree to find a calc node right after ChangelogNormalize
+         * which projects a subset of the columns used by the source scan. If we find such
+         * calc nodes, then we can update our used columns map.
+         */
+        private boolean[] findUsedColumns(StreamPhysicalTableSourceScan source, final Stack<RelNode> stack) {
+            Stack<RelNode> path = (Stack<RelNode>) stack.clone();
+            RelDataType sourceRowType = source.getRowType();
+            boolean[] usedColumns = new boolean[sourceRowType.getFieldCount()];
+
+            final Object[] matchConfig = {
+                StreamPhysicalTableSourceScan.class,
+                StreamPhysicalDropUpdateBefore.class,
+                StreamPhysicalExchange.class,
+                StreamPhysicalChangelogNormalize.class,
+                StreamPhysicalCalc.class
+            };
+
+            ArrayList<RelNode> match = pathMatches(matchConfig, path);
+            LOG.info("MATCH SOUCE source {} match {}", source, match);
+            if (match != null) {
+                StreamPhysicalCalc calc = (StreamPhysicalCalc) match.get(match.size() - 1);
+                StreamPhysicalChangelogNormalize changelogNormalize = (StreamPhysicalChangelogNormalize) match.get(match.size() - 2);
+                computeUsedColumns(calc, changelogNormalize, usedColumns);
+            } else {
+                // if we don't see a match to the plan, then assume all columns have been used
+                // by the subplan, effectively turning off this optization for the source
+                for (int i = 0; i < usedColumns.length; i++) {
+                    usedColumns[i] = true;
+                }
+            }
+
+            return usedColumns;
+        }
+
+        public void showSources() {
+            for (HashMap.Entry<StreamPhysicalTableSourceScan, boolean[]> entry : usedColumnsBySource.entrySet()) {
+                StreamPhysicalTableSourceScan source = entry.getKey();
+                boolean[] usedColumns = entry.getValue();
+                LOG.info("SOURCE node {} used columns {}", source, usedColumns);
+            }
+        }
+    }
+
+    public static List<RelNode> optimize(List<RelNode> inputs) {
+        for (RelNode input : inputs) {
+            PushCalcsVisitor shuttle = new PushCalcsVisitor();
+            LOG.info("optimize called with input node {}", input);
+            shuttle.go(input);
+            shuttle.showSources();
+        }
+        return inputs;
+    }
+
     public void onMatch(RelOptRuleCall call) {
         final StreamPhysicalCalc calc = call.rel(0);
         final StreamPhysicalChangelogNormalize changelogNormalize = call.rel(1);
@@ -223,36 +360,5 @@ public class PushCalcsPastChangelogNormalizeRule
                 newInput,
                 newProgram,
                 origCalc.getProgram().getOutputRowType());
-    }
-
-    // ---------------------------------------------------------------------------------------------
-
-    /** Configuration for {@link PushCalcsPastChangelogNormalizeRule}. */
-    public interface Config extends RelRule.Config {
-
-        @Override
-        default RelOptRule toRule() {
-            return new PushCalcsPastChangelogNormalizeRule(this);
-        }
-
-        default Config onMatch() {
-            final RelRule.OperandTransform exchangeTransform =
-                    operandBuilder ->
-                            operandBuilder.operand(StreamPhysicalExchange.class).anyInputs();
-
-            final RelRule.OperandTransform changelogNormalizeTransform =
-                    operandBuilder ->
-                            operandBuilder
-                                    .operand(StreamPhysicalChangelogNormalize.class)
-                                    .oneInput(exchangeTransform);
-
-            final RelRule.OperandTransform calcTransform =
-                    operandBuilder ->
-                            operandBuilder
-                                    .operand(StreamPhysicalCalc.class)
-                                    .oneInput(changelogNormalizeTransform);
-
-            return withOperandSupplier(calcTransform).as(Config.class);
-        }
     }
 }
