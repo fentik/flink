@@ -72,9 +72,20 @@ public class PushCalcsPastChangelogNormalize {
     public PushCalcsPastChangelogNormalize() {
     }
 
+    public static List<RelNode> optimize(RelBuilder builder, List<RelNode> inputs) {
+        for (RelNode input : inputs) {
+            PushCalcsVisitor shuttle = new PushCalcsVisitor();
+            LOG.info("optimize called with input node {}", input);
+            shuttle.go(input);
+            shuttle.transform(builder);
+        }
+        return inputs;
+    }
+
     static class PushCalcsVisitor extends RelVisitor {
         private Stack<RelNode> stack = new Stack<RelNode>();
         private HashMap<StreamPhysicalTableSourceScan, boolean[]> usedColumnsBySource = new HashMap<>();
+        private List<ArrayList<RelNode>> matches = new ArrayList<ArrayList<RelNode>>();
 
         public PushCalcsVisitor() {
             super();
@@ -98,7 +109,6 @@ public class PushCalcsPastChangelogNormalize {
                         cachedUsedColumns[i] = true;
                     }
                 }
-                LOG.info("XXX source {} cachedUsed {}", source, cachedUsedColumns);
             }
             super.visit(node, ordinal, parent);
             stack.pop();
@@ -172,11 +182,11 @@ public class PushCalcsPastChangelogNormalize {
             };
 
             ArrayList<RelNode> match = pathMatches(matchConfig, path);
-            LOG.info("MATCH SOUCE source {} match {}", source, match);
             if (match != null) {
                 StreamPhysicalCalc calc = (StreamPhysicalCalc) match.get(match.size() - 1);
                 StreamPhysicalChangelogNormalize changelogNormalize = (StreamPhysicalChangelogNormalize) match.get(match.size() - 2);
                 computeUsedColumns(calc, changelogNormalize, usedColumns);
+                matches.add(match);
             } else {
                 // if we don't see a match to the plan, then assume all columns have been used
                 // by the subplan, effectively turning off this optization for the source
@@ -188,177 +198,142 @@ public class PushCalcsPastChangelogNormalize {
             return usedColumns;
         }
 
-        public void showSources() {
-            for (HashMap.Entry<StreamPhysicalTableSourceScan, boolean[]> entry : usedColumnsBySource.entrySet()) {
-                StreamPhysicalTableSourceScan source = entry.getKey();
-                boolean[] usedColumns = entry.getValue();
-                LOG.info("SOURCE node {} used columns {}", source, usedColumns);
-            }
-        }
-    }
-
-    public static List<RelNode> optimize(List<RelNode> inputs) {
-        for (RelNode input : inputs) {
-            PushCalcsVisitor shuttle = new PushCalcsVisitor();
-            LOG.info("optimize called with input node {}", input);
-            shuttle.go(input);
-            shuttle.showSources();
-        }
-        return inputs;
-    }
-
-    public void onMatch(RelOptRuleCall call) {
-        final StreamPhysicalCalc calc = call.rel(0);
-        final StreamPhysicalChangelogNormalize changelogNormalize = call.rel(1);
-
-        // Create a union list of fields between the projected columns and unique keys
-        final RelDataType inputRowType = changelogNormalize.getRowType();
-        final boolean[] isColumnNeeded = new boolean[inputRowType.getFieldCount()];
-        final int[] inputRemap = new int[inputRowType.getFieldCount()];
-
-        // unique key indexes
-        for (int pidx : changelogNormalize.uniqueKeys()) {
-            isColumnNeeded[pidx] = true;
-        }
-
-        final RexProgram program = calc.getProgram();
-
-        // column references in the projection list
-        for (RexLocalRef expr : program.getProjectList()) {
-            // projections can be simple column identieties but they can also contain
-            // expressions, so we need to have a more robust way of extracting all
-            // column references from the projection list with the helper below
-            for (int ref : extractRefInputFields(Collections.singletonList(program.expandLocalRef(expr)))) {
-                isColumnNeeded[ref] = true;
+        public void transform(RelBuilder relBuilder) {
+            for (ArrayList<RelNode> match : matches) {
+                StreamPhysicalTableSourceScan source = (StreamPhysicalTableSourceScan) match.get(0);
+                StreamPhysicalCalc calc = (StreamPhysicalCalc) match.get(match.size() - 1);
+                boolean[] usedColumns = usedColumnsBySource.get(source);
+                int numUsedColumns = 0;
+                for (int i = 0; i < usedColumns.length; i++) {
+                    if (usedColumns[i]) {
+                        numUsedColumns++;
+                    }
+                }
+                if (numUsedColumns == usedColumns.length) {
+                    // all columns are used, do not apply transformation
+                    LOG.info("SOURCE DO NOT APPLY source {}", source);
+                } else {
+                    LOG.info("SOURCE APPLY source {} calc {} usedColumn {}", source, calc, usedColumns);
+                    transform(relBuilder, calc, usedColumns);
+                }
             }
         }
 
-        // column references in any of the predicates
-        RexLocalRef condition = program.getCondition();
-        if (condition != null) {
-            for (int ref : extractRefInputFields(Collections.singletonList(program.expandLocalRef(condition)))) {
-                isColumnNeeded[ref] = true;
+ 
+        private void transform(RelBuilder relBuilder, StreamPhysicalCalc calc, boolean[] usedColumns) {
+            StreamPhysicalChangelogNormalize changelogNormalize = (StreamPhysicalChangelogNormalize) calc.getInput();
+            // Create a union list of fields between the projected columns and unique keys
+            final RelDataType inputRowType = changelogNormalize.getRowType();
+            final int[] inputRemap = new int[inputRowType.getFieldCount()];
+
+            final RexProgram program = calc.getProgram();
+
+            // we need to know the new column index mappings for the calc node
+            // so the array is going to be inputRemap[oldIndex] = new index (or -1 if not needed)
+            for (int prev = 0, curr = 0; prev < usedColumns.length; prev++) {
+                if (usedColumns[prev]) {
+                    inputRemap[prev] = curr;
+                    curr++;
+                } else {
+                    inputRemap[prev] = -1;
+                }
             }
-        }
 
-        boolean allColumnsNeeded = true;
-        for (boolean isNeeded : isColumnNeeded) {
-            if (isNeeded == false) {
-                allColumnsNeeded = false;
-                break;
-            }
-        }
+            // Construct a new ChangelogNormalize which has the new projection pushed into it
+            StreamPhysicalChangelogNormalize newChangelogNormalize =
+                    pushNeededColumnsThroughChangelogNormalize(relBuilder, changelogNormalize, usedColumns);
 
-        if (allColumnsNeeded) {
-            // all columns are needed, no need to push a new projection
-            return;
-        }
+            StreamPhysicalCalc newCalc = projectCopyWithRemap(
+                relBuilder, newChangelogNormalize, calc, inputRemap);
 
-        // we need to know the new column index mappings for the calc node
-        // so the array is going to be inputRemap[oldIndex] = new index (or -1 if not needed)
-        for (int prev = 0, curr = 0; prev < isColumnNeeded.length; prev++) {
-            if (isColumnNeeded[prev]) {
-                inputRemap[prev] = curr;
-                curr++;
+            if (newCalc.getProgram().isTrivial()) {
+                // call.transformTo(newChangelogNormalize);
             } else {
-                inputRemap[prev] = -1;
+                // call.transformTo(newCalc);
             }
         }
 
-        // Construct a new ChangelogNormalize which has the new projection pushed into it
-        StreamPhysicalChangelogNormalize newChangelogNormalize =
-                pushNeededColumnsThroughChangelogNormalize(call, isColumnNeeded);
+        private StreamPhysicalChangelogNormalize pushNeededColumnsThroughChangelogNormalize(
+                RelBuilder relBuilder, StreamPhysicalChangelogNormalize changelogNormalize,
+                boolean[] usedColumns) {
+            final StreamPhysicalExchange exchange = (StreamPhysicalExchange) changelogNormalize.getInput();
 
-        StreamPhysicalCalc newCalc = projectCopyWithRemap(
-            call.builder(), newChangelogNormalize, calc, inputRemap);
+            final StreamPhysicalCalc pushedProjectionCalc =
+                    projectWithNeededColumns(
+                            relBuilder, exchange.getInput(), usedColumns);
 
-        if (newCalc.getProgram().isTrivial()) {
-            call.transformTo(newChangelogNormalize);
-        } else {
-            call.transformTo(newCalc);
+            final StreamPhysicalExchange newExchange =
+                    (StreamPhysicalExchange)
+                            exchange.copy(
+                                    exchange.getTraitSet(),
+                                    Collections.singletonList(pushedProjectionCalc));
+
+            return (StreamPhysicalChangelogNormalize)
+                    changelogNormalize.copy(
+                            changelogNormalize.getTraitSet(), Collections.singletonList(newExchange));
         }
-    }
 
-    private StreamPhysicalChangelogNormalize pushNeededColumnsThroughChangelogNormalize(
-            RelOptRuleCall call, boolean[] isColumnNeeded) {
-        final StreamPhysicalChangelogNormalize changelogNormalize = call.rel(1);
-        final StreamPhysicalExchange exchange = call.rel(2);
+        private StreamPhysicalCalc projectWithNeededColumns(
+                RelBuilder relBuilder, RelNode newInput, boolean[] usedColumns) {
 
-        final StreamPhysicalCalc pushedProjectionCalc =
-                projectWithNeededColumns(
-                        call.builder(), exchange.getInput(), isColumnNeeded);
+            final RexProgramBuilder programBuilder =
+                    new RexProgramBuilder(newInput.getRowType(), relBuilder.getRexBuilder());
+        
+            for (RelDataTypeField field : newInput.getRowType().getFieldList()) {
+                if (usedColumns[field.getIndex()]) {
+                    programBuilder.addProject(new RexInputRef(field.getIndex(), field.getType()), field.getName());
+                }
+            }
 
-        final StreamPhysicalExchange newExchange =
-                (StreamPhysicalExchange)
-                        exchange.copy(
-                                exchange.getTraitSet(),
-                                Collections.singletonList(pushedProjectionCalc));
+            final RexProgram newProgram = programBuilder.getProgram();
+            return new StreamPhysicalCalc(
+                    newInput.getCluster(),
+                    newInput.getTraitSet(),
+                    newInput,
+                    newProgram,
+                    newProgram.getOutputRowType());
+        }
 
-        return (StreamPhysicalChangelogNormalize)
-                changelogNormalize.copy(
-                        changelogNormalize.getTraitSet(), Collections.singletonList(newExchange));
-    }
+        private StreamPhysicalCalc projectCopyWithRemap(RelBuilder relBuilder,
+                    RelNode newInput, StreamPhysicalCalc origCalc, int[] inputRemap) {
 
-    private StreamPhysicalCalc projectWithNeededColumns(
-            RelBuilder relBuilder, RelNode newInput, boolean[] isColumnNeeded) {
+            // We have the original calc which references inputs from the wider row
+            // before we projected away the unused columns. In the code below, we need
+            // to take all the references in the original Calc and remap that to the
+            // new (reduced) input row.
 
-        final RexProgramBuilder programBuilder =
+            final RexProgramBuilder programBuilder =
                 new RexProgramBuilder(newInput.getRowType(), relBuilder.getRexBuilder());
-       
-        for (RelDataTypeField field : newInput.getRowType().getFieldList()) {
-            if (isColumnNeeded[field.getIndex()]) {
-                programBuilder.addProject(new RexInputRef(field.getIndex(), field.getType()), field.getName());
+
+            RexShuttle remapVisitor = new RexShuttle() {
+                @Override
+                public RexNode visitInputRef(RexInputRef inputRef) {
+                    return new RexInputRef(inputRemap[inputRef.getIndex()], inputRef.getType());
+                }
+            };
+
+            // rewrite all the simple projections
+            for (RexLocalRef ref : origCalc.getProgram().getProjectList()) {
+                RexNode expandedRef  = origCalc.getProgram().expandLocalRef(ref);
+                RexNode newRef = expandedRef.accept(remapVisitor);
+                programBuilder.addProject(newRef, ref.getName());
             }
-        }
 
-        final RexProgram newProgram = programBuilder.getProgram();
-        return new StreamPhysicalCalc(
-                newInput.getCluster(),
-                newInput.getTraitSet(),
-                newInput,
-                newProgram,
-                newProgram.getOutputRowType());
-    }
-
-    private StreamPhysicalCalc projectCopyWithRemap(RelBuilder relBuilder,
-                RelNode newInput, StreamPhysicalCalc origCalc, int[] inputRemap) {
-
-        // We have the original calc which references inputs from the wider row
-        // before we projected away the unused columns. In the code below, we need
-        // to take all the references in the original Calc and remap that to the
-        // new (reduced) input row.
-
-        final RexProgramBuilder programBuilder =
-            new RexProgramBuilder(newInput.getRowType(), relBuilder.getRexBuilder());
-
-        RexShuttle remapVisitor = new RexShuttle() {
-            @Override
-            public RexNode visitInputRef(RexInputRef inputRef) {
-                return new RexInputRef(inputRemap[inputRef.getIndex()], inputRef.getType());
+            // rewrite any predicates (if exists)
+            RexLocalRef conditionLocalRef = origCalc.getProgram().getCondition();
+            if (conditionLocalRef != null) {
+                RexNode expandedRef  = origCalc.getProgram().expandLocalRef(conditionLocalRef);
+                RexNode newRef = expandedRef.accept(remapVisitor);
+                programBuilder.addCondition(newRef);
             }
-        };
 
-        // rewrite all the simple projections
-        for (RexLocalRef ref : origCalc.getProgram().getProjectList()) {
-            RexNode expandedRef  = origCalc.getProgram().expandLocalRef(ref);
-            RexNode newRef = expandedRef.accept(remapVisitor);
-            programBuilder.addProject(newRef, ref.getName());
+            final RexProgram newProgram = programBuilder.getProgram();
+            return new StreamPhysicalCalc(
+                    newInput.getCluster(),
+                    newInput.getTraitSet(),
+                    newInput,
+                    newProgram,
+                    origCalc.getProgram().getOutputRowType());
         }
-
-        // rewrite any predicates (if exists)
-        RexLocalRef conditionLocalRef = origCalc.getProgram().getCondition();
-        if (conditionLocalRef != null) {
-            RexNode expandedRef  = origCalc.getProgram().expandLocalRef(conditionLocalRef);
-            RexNode newRef = expandedRef.accept(remapVisitor);
-            programBuilder.addCondition(newRef);
-        }
-
-        final RexProgram newProgram = programBuilder.getProgram();
-        return new StreamPhysicalCalc(
-                newInput.getCluster(),
-                newInput.getTraitSet(),
-                newInput,
-                newProgram,
-                origCalc.getProgram().getOutputRowType());
     }
 }

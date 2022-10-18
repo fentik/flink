@@ -500,7 +500,7 @@ abstract class PlannerBase(
       case o => throw new TableException(s"Unsupported operation: ${o.getClass.getCanonicalName}")
     }
     // val optimizedRelNodes = optimize(sinkRelNodes)
-    val optimizedRelNodes = PushCalcsPastChangelogNormalize.optimize(optimize(sinkRelNodes))
+    val optimizedRelNodes = PushCalcsPastChangelogNormalize.optimize(getRelBuilder, optimize(sinkRelNodes))
     val execGraph = translateToExecNodeGraph(optimizedRelNodes)
 
     val transformations = translateToPlan(execGraph)
