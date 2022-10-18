@@ -73,13 +73,15 @@ public class PushCalcsPastChangelogNormalize {
     }
 
     public static List<RelNode> optimize(RelBuilder builder, List<RelNode> inputs) {
+        ArrayList<RelNode> newInputs = new ArrayList<RelNode>(inputs.size());
         for (RelNode input : inputs) {
             PushCalcsVisitor shuttle = new PushCalcsVisitor();
             LOG.info("optimize called with input node {}", input);
             shuttle.go(input);
-            shuttle.transform(builder);
+            RelNode newInput = shuttle.transform(input, builder);
+            newInputs.add(newInput);
         }
-        return inputs;
+        return newInputs;
     }
 
     static class PushCalcsVisitor extends RelVisitor {
@@ -198,7 +200,7 @@ public class PushCalcsPastChangelogNormalize {
             return usedColumns;
         }
 
-        public void transform(RelBuilder relBuilder) {
+        public RelNode transform(RelNode input, RelBuilder relBuilder) {
             for (ArrayList<RelNode> match : matches) {
                 StreamPhysicalTableSourceScan source = (StreamPhysicalTableSourceScan) match.get(0);
                 StreamPhysicalCalc calc = (StreamPhysicalCalc) match.get(match.size() - 1);
@@ -214,13 +216,41 @@ public class PushCalcsPastChangelogNormalize {
                     LOG.info("SOURCE DO NOT APPLY source {}", source);
                 } else {
                     LOG.info("SOURCE APPLY source {} calc {} usedColumn {}", source, calc, usedColumns);
-                    transform(relBuilder, calc, usedColumns);
+                    RelNode newNode = transform(relBuilder, calc, usedColumns);
+                    input = rewrite(input, calc, newNode);
                 }
             }
+            return input;
+        }
+
+        private RelNode rewrite(RelNode root, RelNode origNode, RelNode newNode) {
+            if (origNode == newNode) {
+                return root;
+            }
+
+            if (root == origNode) {
+                return newNode;
+            }
+
+            RelVisitor visitor = new RelVisitor() {
+                @Override
+                public void visit(RelNode node, int ordinal, @Nullable RelNode parent) {
+                    if (node == origNode) {
+                        LOG.info("REPLACE node {} origNode {} parent {}", node, origNode, parent);
+                        parent.replaceInput(0, newNode);
+                    } else {
+                        super.visit(node, ordinal, parent);
+                    }
+                }
+            };
+
+            visitor.go(root);
+
+            return root; 
         }
 
  
-        private void transform(RelBuilder relBuilder, StreamPhysicalCalc calc, boolean[] usedColumns) {
+        private RelNode transform(RelBuilder relBuilder, StreamPhysicalCalc calc, boolean[] usedColumns) {
             StreamPhysicalChangelogNormalize changelogNormalize = (StreamPhysicalChangelogNormalize) calc.getInput();
             // Create a union list of fields between the projected columns and unique keys
             final RelDataType inputRowType = changelogNormalize.getRowType();
@@ -247,9 +277,9 @@ public class PushCalcsPastChangelogNormalize {
                 relBuilder, newChangelogNormalize, calc, inputRemap);
 
             if (newCalc.getProgram().isTrivial()) {
-                // call.transformTo(newChangelogNormalize);
+                return newChangelogNormalize;
             } else {
-                // call.transformTo(newCalc);
+                return newCalc;
             }
         }
 
