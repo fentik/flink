@@ -44,8 +44,6 @@ import org.apache.calcite.tools.RelBuilder;
 import org.apache.calcite.util.Pair;
 import org.apache.calcite.rel.RelVisitor;
 import org.checkerframework.checker.nullness.qual.Nullable;
-import org.apache.flink.table.planner.plan.utils.FlinkRelOptUtil;
-
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -63,20 +61,78 @@ import org.slf4j.LoggerFactory;
 import static org.apache.flink.table.planner.plan.utils.RexNodeExtractor.extractRefInputFields;
 
 /**
+ * We want to optimize state size for ChanglogNormalize by removing unused column
+ * references from the plan. Before this optimization, all columns of a TableSource
+ * would be used as inputs to ChanglogNormalize with projectctions (Calc) nodes
+ * coming after the ChangelogNormalize.
+ * 
+ * By reducing the columns going into ChangelogNormalize we can accomplish the
+ * following:
+ *   1. Reduction of state used up by ChanegelogNormalize
+ *   2. Supressing emitting events when rows with used columns did not change.
+ * 
+ * The second optimization is particularly impactful since we have customers where
+ * an ORM continuously updates some field (e.g. last_updated_ts), but none of the
+ * columns used by the query are changed. In that condition, we want to prevent
+ * ChangelogNormalize from emitting an event which would effectively retract and
+ * then update the exact same value, causing a lot of extra work in the pipeline.
+ * 
+ * The following optimization needs to maintain state, so the standard HepOptimizer
+ * rule rewrites are not sufficient.
+ *
+ * The optimization works as follows:
+ *   1. Find all of the TableSourceScans that have a ChangelogNormalizer and Calc.
+ *   2. For each TableSourceScan, maintain a list of all used columns.
+ *   3. In cases where not all columns are used, insert a new Calc node before
+ *      the ChangelogNormalizer that projects only the used columns.
+ * 
+ * Note: It's very important to compute step 2 so that we do not undermine the
+ *  reuse subgraph optimization. We need to make sure that the subtrees under
+ *  each ChangelogNormalizer are the same (i.e. have the same Calc projection).
+ * 
+ * See the example execution plan below for the following query:
+ *  select o1.order_item_id, o1.product_id, o2.merchant_id
+ *    from order_items o1
+ *    join order_items o2 on o1.order_item_id = o2.order_item_id
+ *   where o1.product_name = '123';
+ * 
+ * Notice how the right side of the join has a Reused(reference_id=[1]) pointer to
+ * the left hand sise ChangelogNormalize. And that part of the tree hgas a Calc
+ * node before the Exchange that projects the columns from `order_items` referenced
+ * by both sides of the join.
+ * 
+ * == Optimized Execution Plan ==
+ * Calc(select=[order_item_id, product_id, merchant_id])
+ * +- Join(joinType=[InnerJoin], where=[(order_item_id = $t0)], select=[order_item_id, product_id, $t0, $t1], leftInputSpec=[JoinKeyContainsUniqueKey], rightInputSpec=[JoinKeyContainsUniqueKey])
+ *    :- Exchange(distribution=[hash[$t0]])
+ *    :  +- Calc(select=[order_item_id AS $t0, product_id AS $t3], where=[(product_name = '123')])
+ *    :     +- ChangelogNormalize(key=[order_item_id])(reuse_id=[1])
+ *    :        +- Exchange(distribution=[hash[order_item_id]])
+ *    :           +- Calc(select=[order_item_id, merchant_id, product_id, product_name])
+ *    :              +- DropUpdateBefore
+ *    :                 +- TableSourceScan(table=[[9739e980-6aa7-4817-9d61-8c00fd27c970, source_1, order_items]], fields=[order_item_id, merchant_id, order_id, product_id, category, product_name, quantity, price, order_time])
+ *    +- Exchange(distribution=[hash[$t0]])
+ *       +- Calc(select=[order_item_id AS $t0, merchant_id AS $t1])
+ *          +- Reused(reference_id=[1])
  */
+
 @Internal
 public class PushCalcsPastChangelogNormalize {
 
     private static final Logger LOG = LoggerFactory.getLogger(PushCalcsPastChangelogNormalize.class);
 
-    public PushCalcsPastChangelogNormalize() {
-    }
-
+    /**
+     * Called by the planner after all of the Physical plan optimizations have been
+     * performed but right before the subplan reuse code.
+     * 
+     * @param builder
+     * @param inputs
+     * @return new list of inputs
+     */
     public static List<RelNode> optimize(RelBuilder builder, List<RelNode> inputs) {
         ArrayList<RelNode> newInputs = new ArrayList<RelNode>(inputs.size());
         for (RelNode input : inputs) {
             PushCalcsVisitor shuttle = new PushCalcsVisitor();
-            LOG.info("optimize called with input node {}", input);
             shuttle.go(input);
             RelNode newInput = shuttle.transform(input, builder);
             newInputs.add(newInput);
@@ -93,6 +149,14 @@ public class PushCalcsPastChangelogNormalize {
             super();
         }
 
+        /**
+         * Walk the entire physical plan looking for TableSourceScan nodes. For every
+         * such node, maintain a set of used columns from the source. The set consists
+         * of a boolean array indexed by the ordinal position of the column in the source
+         * with the boolean value indicating whether the column is used. Note how the code
+         * reuses the boolean array for duplicate table sources and maintains a global set
+         * of all used columns.
+         */
         @Override
         public void visit(RelNode node, int ordinal, @Nullable RelNode parent) {
             stack.push(node);
@@ -211,11 +275,8 @@ public class PushCalcsPastChangelogNormalize {
                         numUsedColumns++;
                     }
                 }
-                if (numUsedColumns == usedColumns.length) {
-                    // all columns are used, do not apply transformation
-                    LOG.info("SOURCE DO NOT APPLY source {}", source);
-                } else {
-                    LOG.info("SOURCE APPLY source {} calc {} usedColumn {}", source, calc, usedColumns);
+                if (numUsedColumns != usedColumns.length) {
+                    // only apply the transformation when not all columns are used
                     RelNode newNode = transform(relBuilder, calc, usedColumns);
                     input = rewrite(input, calc, newNode);
                 }
@@ -236,7 +297,6 @@ public class PushCalcsPastChangelogNormalize {
                 @Override
                 public void visit(RelNode node, int ordinal, @Nullable RelNode parent) {
                     if (node == origNode) {
-                        LOG.info("REPLACE node {} origNode {} parent {}", node, origNode, parent);
                         parent.replaceInput(0, newNode);
                     } else {
                         super.visit(node, ordinal, parent);
