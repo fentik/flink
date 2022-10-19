@@ -24,6 +24,7 @@ import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamPhysicalC
 import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamPhysicalExchange;
 import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamPhysicalTableSourceScan;
 import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamPhysicalDropUpdateBefore;
+import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamPhysicalMiniBatchAssigner;
 
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
@@ -239,15 +240,33 @@ public class PushCalcsPastChangelogNormalize {
             RelDataType sourceRowType = source.getRowType();
             boolean[] usedColumns = new boolean[sourceRowType.getFieldCount()];
 
-            final Object[] matchConfig = {
-                StreamPhysicalTableSourceScan.class,
-                StreamPhysicalDropUpdateBefore.class,
-                StreamPhysicalExchange.class,
-                StreamPhysicalChangelogNormalize.class,
-                StreamPhysicalCalc.class
+            final Object[][] matchConfigs = {
+                { // with mini batch enabled plans
+                    StreamPhysicalTableSourceScan.class,
+                    StreamPhysicalMiniBatchAssigner.class,
+                    StreamPhysicalDropUpdateBefore.class,
+                    StreamPhysicalExchange.class,
+                    StreamPhysicalChangelogNormalize.class,
+                    StreamPhysicalCalc.class
+                },
+                { // without mini batch
+                    StreamPhysicalTableSourceScan.class,
+                    StreamPhysicalDropUpdateBefore.class,
+                    StreamPhysicalExchange.class,
+                    StreamPhysicalChangelogNormalize.class,
+                    StreamPhysicalCalc.class
+                },
             };
 
-            ArrayList<RelNode> match = pathMatches(matchConfig, path);
+            // Find the first matching subtree from above
+            ArrayList<RelNode> match = null;
+            for (Object[] matchConfig : matchConfigs) {
+                match = pathMatches(matchConfig, path);
+                if (match != null) {
+                    break;
+                }
+            }
+
             if (match != null) {
                 StreamPhysicalCalc calc = (StreamPhysicalCalc) match.get(match.size() - 1);
                 StreamPhysicalChangelogNormalize changelogNormalize = (StreamPhysicalChangelogNormalize) match.get(match.size() - 2);
