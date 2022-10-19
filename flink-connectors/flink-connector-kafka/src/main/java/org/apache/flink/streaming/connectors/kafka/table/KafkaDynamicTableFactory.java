@@ -180,8 +180,9 @@ public class KafkaDynamicTableFactory
 
         final ReadableConfig tableOptions = helper.getOptions();
 
-        final boolean isBatchBackfillEnabled = context.getConfiguration()
-                .get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL);
+        final boolean isBoundedLatest =
+                context.getConfiguration().get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL)
+                || context.getConfiguration().get(ExecutionConfigOptions.TABLE_EXEC_IS_BOUNDED_LATEST);
 
         validateTableSourceOptions(tableOptions);
 
@@ -224,7 +225,7 @@ public class KafkaDynamicTableFactory
                 startupOptions.specificOffsets,
                 startupOptions.startupTimestampMillis,
                 getSourceParallelism(tableOptions),
-                isBatchBackfillEnabled,
+                isBoundedLatest,
                 context.getObjectIdentifier().asSummaryString());
     }
 
@@ -381,7 +382,7 @@ public class KafkaDynamicTableFactory
             Map<KafkaTopicPartition, Long> specificStartupOffsets,
             long startupTimestampMillis,
             int sourceParallelism,
-            boolean isBatchBackfillEnabled,
+            boolean isBoundedLatest,
             String tableIdentifier) {
         return new KafkaDynamicSource(
                 physicalDataType,
@@ -398,7 +399,7 @@ public class KafkaDynamicTableFactory
                 startupTimestampMillis,
                 false,
                 sourceParallelism,
-                isBatchBackfillEnabled,
+                isBoundedLatest,
                 tableIdentifier);
     }
 

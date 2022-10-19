@@ -377,6 +377,13 @@ public class ExecutionConfigOptions {
             .defaultValue(false)
             .withDescription("Use hybrid batch stream mode for backfill");
 
+    @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
+    public static final ConfigOption<Boolean> TABLE_EXEC_IS_BOUNDED_LATEST = key(
+            "table.exec.force-bounded-latest")
+            .booleanType()
+            .defaultValue(false)
+            .withDescription("Use bounded mode for unbounded Kafka operators");
+
     
     @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
     public static final ConfigOption<Boolean> TABLE_EXEC_DEDUP_SINK_MATERIALIZER = key(

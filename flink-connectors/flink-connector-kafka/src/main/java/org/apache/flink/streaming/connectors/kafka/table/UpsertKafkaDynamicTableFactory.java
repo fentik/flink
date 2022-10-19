@@ -129,9 +129,9 @@ public class UpsertKafkaDynamicTableFactory
         // always use earliest to keep data integrity
         StartupMode earliest = StartupMode.EARLIEST;
 
-	final boolean isBatchBackfillEnabled = context.getConfiguration()
-                .get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL);
-
+        final boolean isBoundedLatest =
+                context.getConfiguration().get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL)
+                || context.getConfiguration().get(ExecutionConfigOptions.TABLE_EXEC_IS_BOUNDED_LATEST);
 
         return new KafkaDynamicSource(
                 context.getPhysicalRowDataType(),
@@ -148,7 +148,7 @@ public class UpsertKafkaDynamicTableFactory
                 0,
                 true,
                 -1 /* sourceParallelism */,
-		isBatchBackfillEnabled,
+		        isBoundedLatest,
                 context.getObjectIdentifier().asSummaryString());
     }
 

@@ -170,7 +170,7 @@ public class KafkaDynamicSource
 
     protected final int sourceParallelism;
 
-    protected final boolean isBatchBackfillEnabled;
+    protected final boolean isBoundedLatest;
 
     public KafkaDynamicSource(
             DataType physicalDataType,
@@ -187,7 +187,7 @@ public class KafkaDynamicSource
             long startupTimestampMillis,
             boolean upsertMode,
             int sourceParallelism,
-            boolean isBatchBackfillEnabled,
+            boolean isBoundedLatest,
             String tableIdentifier) {
         // Format attributes
         this.physicalDataType = Preconditions.checkNotNull(
@@ -217,7 +217,7 @@ public class KafkaDynamicSource
         this.upsertMode = upsertMode;
         this.tableIdentifier = tableIdentifier;
         this.sourceParallelism = sourceParallelism;
-        this.isBatchBackfillEnabled = isBatchBackfillEnabled;
+        this.isBoundedLatest = isBoundedLatest;
     }
 
     @Override
@@ -330,7 +330,7 @@ public class KafkaDynamicSource
                 startupTimestampMillis,
                 upsertMode,
                 sourceParallelism,
-                isBatchBackfillEnabled,
+                isBoundedLatest,
                 tableIdentifier);
         copy.producedDataType = producedDataType;
         copy.metadataKeys = metadataKeys;
@@ -411,7 +411,7 @@ public class KafkaDynamicSource
             kafkaSourceBuilder.setTopicPattern(topicPattern);
         }
 
-        if (isBatchBackfillEnabled) {
+        if (isBoundedLatest) {
             kafkaSourceBuilder.setBounded(OffsetsInitializer.latest());
         }
 
