@@ -303,14 +303,16 @@ abstract class PlannerBase(
   private[flink] def optimize(relNodes: Seq[RelNode]): Seq[RelNode] = {
     val optimizedRelNodes = getOptimizer.optimize(relNodes)
     require(optimizedRelNodes.size == relNodes.size)
-    optimizedRelNodes
+    // XXX(sst): in 1.16, there's a hook for this use case, but for now hack it
+    PushCalcsPastChangelogNormalize.optimize(getRelBuilder, optimizedRelNodes)
   }
 
   @VisibleForTesting
   private[flink] def optimize(relNode: RelNode): RelNode = {
     val optimizedRelNodes = getOptimizer.optimize(Seq(relNode))
     require(optimizedRelNodes.size == 1)
-    optimizedRelNodes.head
+    // XXX(sst): in 1.16, there's a hook for this use case, but for now hack it
+    PushCalcsPastChangelogNormalize.optimize(getRelBuilder, optimizedRelNodes).head
   }
 
   /**
@@ -499,8 +501,7 @@ abstract class PlannerBase(
         translateToRel(modifyOperation)
       case o => throw new TableException(s"Unsupported operation: ${o.getClass.getCanonicalName}")
     }
-    // val optimizedRelNodes = optimize(sinkRelNodes)
-    val optimizedRelNodes = PushCalcsPastChangelogNormalize.optimize(getRelBuilder, optimize(sinkRelNodes))
+    val optimizedRelNodes = optimize(sinkRelNodes)
     val execGraph = translateToExecNodeGraph(optimizedRelNodes)
 
     val transformations = translateToPlan(execGraph)
