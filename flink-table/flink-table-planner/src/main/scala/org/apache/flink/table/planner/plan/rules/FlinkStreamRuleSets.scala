@@ -506,7 +506,7 @@ object FlinkStreamRuleSets {
     // optimize window agg rule
     TwoStageOptimizedWindowAggregateRule.INSTANCE,
     // optimize ChangelogNormalize
-    PushFilterPastChangelogNormalizeRule.INSTANCE,
+    PushFilterPastChangelogNormalizeRule.INSTANCE
   )
 
 }
