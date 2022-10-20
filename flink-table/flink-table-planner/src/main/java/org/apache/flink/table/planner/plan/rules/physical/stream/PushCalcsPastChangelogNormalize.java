@@ -26,8 +26,10 @@ import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamPhysicalT
 import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamPhysicalDropUpdateBefore;
 import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamPhysicalMiniBatchAssigner;
 
+import org.apache.calcite.util.mapping.Mapping;
 import org.apache.calcite.util.mapping.Mappings;
 import org.apache.calcite.util.mapping.MappingType;
+import org.apache.calcite.util.mapping.AbstractTargetMapping;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.plan.RelOptUtil;
@@ -366,6 +368,29 @@ public class PushCalcsPastChangelogNormalize {
             }
         }
 
+        static class TargetRemap extends AbstractTargetMapping {
+            private int[] inputRemap;
+
+            static private int targetCount(int[] inputRemap) {
+                int targetCount = 0;
+                for (int i = 0; i < inputRemap.length; i++) {
+                    if (inputRemap[i] >= 0) {
+                        targetCount++;
+                    }
+                }
+                return targetCount;
+            }
+
+            public TargetRemap(int[] inputRemap) {
+                super(inputRemap.length, targetCount(inputRemap));
+                this.inputRemap = inputRemap;
+            }
+
+            public int getTargetOpt(int source) {
+                return inputRemap[source];
+            }
+        }
+
         private StreamPhysicalChangelogNormalize pushNeededColumnsThroughChangelogNormalize(
                 RelBuilder relBuilder, StreamPhysicalChangelogNormalize changelogNormalize,
                 boolean[] usedColumns, int[] inputRemap) {
@@ -375,12 +400,7 @@ public class PushCalcsPastChangelogNormalize {
                     projectWithNeededColumns(
                             relBuilder, exchange.getInput(), usedColumns);
 
-            List<Integer> remapSourceList = Arrays.asList(IntStream.of(inputRemap).boxed().toArray(Integer[]::new));
-            Mappings.PartialMapping remap = new Mappings.PartialMapping(
-                remapSourceList,
-                remapSourceList.size(),
-                MappingType.PARTIAL_INJECTION);
-
+            Mappings.TargetMapping remap = new TargetRemap(inputRemap);
             RelDistribution newDistibution = exchange.getDistribution().apply(remap);
 
             final StreamPhysicalExchange newExchange =
