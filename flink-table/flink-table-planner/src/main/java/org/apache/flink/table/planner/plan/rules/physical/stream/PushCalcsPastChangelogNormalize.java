@@ -26,6 +26,8 @@ import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamPhysicalT
 import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamPhysicalDropUpdateBefore;
 import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamPhysicalMiniBatchAssigner;
 
+import org.apache.calcite.util.mapping.Mappings;
+import org.apache.calcite.util.mapping.MappingType;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.plan.RelOptUtil;
@@ -44,6 +46,7 @@ import org.apache.calcite.rex.RexShuttle;
 import org.apache.calcite.tools.RelBuilder;
 import org.apache.calcite.util.Pair;
 import org.apache.calcite.rel.RelVisitor;
+import org.apache.calcite.rel.RelDistribution;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.util.ArrayList;
@@ -350,7 +353,8 @@ public class PushCalcsPastChangelogNormalize {
 
             // Construct a new ChangelogNormalize which has the new projection pushed into it
             StreamPhysicalChangelogNormalize newChangelogNormalize =
-                    pushNeededColumnsThroughChangelogNormalize(relBuilder, changelogNormalize, usedColumns);
+                    pushNeededColumnsThroughChangelogNormalize(
+                        relBuilder, changelogNormalize, usedColumns, inputRemap);
 
             StreamPhysicalCalc newCalc = projectCopyWithRemap(
                 relBuilder, newChangelogNormalize, calc, inputRemap);
@@ -364,22 +368,40 @@ public class PushCalcsPastChangelogNormalize {
 
         private StreamPhysicalChangelogNormalize pushNeededColumnsThroughChangelogNormalize(
                 RelBuilder relBuilder, StreamPhysicalChangelogNormalize changelogNormalize,
-                boolean[] usedColumns) {
+                boolean[] usedColumns, int[] inputRemap) {
             final StreamPhysicalExchange exchange = (StreamPhysicalExchange) changelogNormalize.getInput();
 
             final StreamPhysicalCalc pushedProjectionCalc =
                     projectWithNeededColumns(
                             relBuilder, exchange.getInput(), usedColumns);
 
+            List<Integer> remapSourceList = Arrays.asList(IntStream.of(inputRemap).boxed().toArray(Integer[]::new));
+            Mappings.PartialMapping remap = new Mappings.PartialMapping(
+                remapSourceList,
+                remapSourceList.size(),
+                MappingType.PARTIAL_INJECTION);
+
+            RelDistribution newDistibution = exchange.getDistribution().apply(remap);
+
             final StreamPhysicalExchange newExchange =
                     (StreamPhysicalExchange)
                             exchange.copy(
                                     exchange.getTraitSet(),
-                                    Collections.singletonList(pushedProjectionCalc));
+                                    pushedProjectionCalc,
+                                    newDistibution);
+            newExchange.recomputeDigest();
+
+            int[] keys = changelogNormalize.uniqueKeys();
+            int[] newKeys = new int[keys.length];
+            for (int i = 0; i < keys.length; i++) {
+                newKeys[i] = inputRemap[keys[i]];
+            }
 
             return (StreamPhysicalChangelogNormalize)
                     changelogNormalize.copy(
-                            changelogNormalize.getTraitSet(), Collections.singletonList(newExchange));
+                            changelogNormalize.getTraitSet(),
+                            newExchange,
+                            newKeys);
         }
 
         private StreamPhysicalCalc projectWithNeededColumns(
@@ -390,6 +412,7 @@ public class PushCalcsPastChangelogNormalize {
         
             for (RelDataTypeField field : newInput.getRowType().getFieldList()) {
                 if (usedColumns[field.getIndex()]) {
+                    // XXX(sergei): we do not properly set the field name here
                     programBuilder.addProject(new RexInputRef(field.getIndex(), field.getType()), field.getName());
                 }
             }
