@@ -321,7 +321,7 @@ public class PushCalcsPastChangelogNormalize {
                 @Override
                 public void visit(RelNode node, int ordinal, @Nullable RelNode parent) {
                     if (node == origNode) {
-                        parent.replaceInput(0, newNode);
+                        parent.replaceInput(ordinal, newNode);
                     } else {
                         super.visit(node, ordinal, parent);
                     }
@@ -432,7 +432,6 @@ public class PushCalcsPastChangelogNormalize {
         
             for (RelDataTypeField field : newInput.getRowType().getFieldList()) {
                 if (usedColumns[field.getIndex()]) {
-                    // XXX(sergei): we do not properly set the field name here
                     programBuilder.addProject(new RexInputRef(field.getIndex(), field.getType()), field.getName());
                 }
             }
@@ -464,11 +463,15 @@ public class PushCalcsPastChangelogNormalize {
                 }
             };
 
+            List<String> origFieldNames = origCalc.getRowType().getFieldNames();
+            int i = 0;
             // rewrite all the simple projections
             for (RexLocalRef ref : origCalc.getProgram().getProjectList()) {
+                String origFieldName = origFieldNames.get(i);
                 RexNode expandedRef  = origCalc.getProgram().expandLocalRef(ref);
                 RexNode newRef = expandedRef.accept(remapVisitor);
-                programBuilder.addProject(newRef, ref.getName());
+                programBuilder.addProject(newRef, origFieldName);
+                i++;
             }
 
             // rewrite any predicates (if exists)
