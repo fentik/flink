@@ -73,6 +73,8 @@ public class LagWithRetractAggFunction<T> extends BuiltInAggregateFunction<T, La
 
     /** Accumulator for LAG. */
     public static class LagWithRetractAccumulator<T> {
+        static int UNIQUE_ID = 0;
+        int uid = ++UNIQUE_ID;
         public int offset = 1;
         public T defaultValue = null;
         public LinkedHashSet<T> buffer = new LinkedHashSet<>();
@@ -95,9 +97,14 @@ public class LagWithRetractAggFunction<T> extends BuiltInAggregateFunction<T, La
         public int hashCode() {
             return Objects.hash(offset, defaultValue, buffer);
         }
+
+        public int uniqueID() {
+            return uid;
+        }
     }
 
     public void accumulate(LagWithRetractAccumulator<T> acc, T value) throws Exception {
+        LOG.info(acc.uniqueID() + ": Accumulating value " + value.toString());
         acc.buffer.add(value);
         // We only keep 10x the offset needed in our state to keep memory bounded. This
         // can cause incorrect result. So, adding a warning to the accumulator.
@@ -106,6 +113,7 @@ public class LagWithRetractAggFunction<T> extends BuiltInAggregateFunction<T, La
                acc.buffer.remove(element);
                break;
             }
+            LOG.info("Dropping value. Results will be incorrect.");
         }
         // TODO(akhilg): Add logging.
     }
@@ -120,6 +128,7 @@ public class LagWithRetractAggFunction<T> extends BuiltInAggregateFunction<T, La
     }
 
     public void retract(LagWithRetractAccumulator<T> acc, Object value) throws Exception {
+        LOG.info(acc.uniqueID() + ": Removing value " + value.toString());
         acc.buffer.remove(value);
     }
 
@@ -137,14 +146,19 @@ public class LagWithRetractAggFunction<T> extends BuiltInAggregateFunction<T, La
     @Override
     public T getValue(LagWithRetractAccumulator<T> acc) {
         if (acc.buffer.size() < acc.offset + 1) {
+            LOG.info(acc.uniqueID() + ": Returning default value since size is " + acc.buffer.size());
             return acc.defaultValue;
         }
-        int n = acc.buffer.size() - acc.offset;
+        int n = acc.buffer.size() - acc.offset - 1;
+        LOG.info(acc.uniqueID() + ": Returning " + n + " index since size is " + acc.buffer.size() + " with " + acc.offset);
+
         if (n < acc.buffer.size()) {
             int count = 0;
             for (T element : acc.buffer) {
-                if (n == count)
+                if (n == count) {
+                    LOG.info(acc.uniqueID() + ": Returning " + element.toString());
                     return element;
+                }
                 count++;
             }
         }
@@ -153,6 +167,7 @@ public class LagWithRetractAggFunction<T> extends BuiltInAggregateFunction<T, La
 
     @Override
     public LagWithRetractAccumulator<T> createAccumulator() {
+        LOG.info("Creating a new accumulator....");
         return new LagWithRetractAccumulator<>();
     }
 

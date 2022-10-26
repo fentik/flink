@@ -18,6 +18,7 @@
 package org.apache.flink.table.planner.plan.utils
 
 import org.apache.flink.table.api.TableException
+import org.apache.flink.table.planner.utils.Logging
 import org.apache.flink.table.functions.UserDefinedFunction
 import org.apache.flink.table.planner.functions.aggfunctions.SingleValueAggFunction._
 import org.apache.flink.table.planner.functions.aggfunctions.SumWithRetractAggFunction._
@@ -25,7 +26,7 @@ import org.apache.flink.table.planner.functions.aggfunctions._
 import org.apache.flink.table.planner.functions.bridging.BridgingSqlAggFunction
 import org.apache.flink.table.planner.functions.sql.{SqlFirstLastValueAggFunction, SqlListAggFunction}
 import org.apache.flink.table.planner.functions.utils.AggSqlFunction
-import org.apache.flink.table.runtime.functions.aggregate.{BuiltInAggregateFunction, CollectAggFunction, FirstValueAggFunction, FirstValueWithRetractAggFunction, JsonArrayAggFunction, JsonObjectAggFunction, LagAggFunction, LastValueAggFunction, LastValueWithRetractAggFunction, ListAggWithRetractAggFunction, ListAggWsWithRetractAggFunction, MaxWithRetractAggFunction, MinWithRetractAggFunction}
+import org.apache.flink.table.runtime.functions.aggregate.{BuiltInAggregateFunction, CollectAggFunction, FirstValueAggFunction, FirstValueWithRetractAggFunction, JsonArrayAggFunction, JsonObjectAggFunction, LagAggFunction, LagWithRetractAggFunction, LastValueAggFunction, LastValueWithRetractAggFunction, ListAggWithRetractAggFunction, ListAggWsWithRetractAggFunction, MaxWithRetractAggFunction, MinWithRetractAggFunction}
 import org.apache.flink.table.types.logical.LogicalTypeRoot._
 import org.apache.flink.table.types.logical._
 
@@ -51,7 +52,7 @@ class AggFunctionFactory(
     inputRowType: RowType,
     orderKeyIndexes: Array[Int],
     aggCallNeedRetractions: Array[Boolean],
-    isBounded: Boolean) {
+    isBounded: Boolean) extends Logging {
 
   /**
     * The entry point to create an aggregate function from the given [[AggregateCall]].
@@ -300,10 +301,12 @@ class AggFunctionFactory(
     }
 
     if (aggCallNeedRetractions(index)) {
-      throw new TableException("LAG Function with retraction is not supported in stream mode.")
+      LOG.info("The agg call needs retraction ." + index)
+      new LagWithRetractAggFunction(argTypes)
+    } else {
+      LOG.info("The agg call DOESNT needs retraction. " + index)
+      new LagAggFunction(argTypes)
     }
-
-    new LagAggFunction(argTypes)
   }
 
   private def createBatchLeadLagAggFunction(

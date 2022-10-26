@@ -172,7 +172,7 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
             rowTimeIdx = -1;
         } else {
             throw new TableException(
-                    "OVER windows' ordering in stream mode must be defined on a time attribute.");
+                    "OVER windows' ordering in stream mode must be defined on a time attribute instead of " + orderKeyType);
         }
 
         final List<RexLiteral> constants = overSpec.getConstants();
@@ -250,7 +250,7 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
                         partitionKeys, InternalTypeInfo.of(inputRowType));
         transform.setStateKeySelector(selector);
         transform.setStateKeyType(selector.getProducedType());
-
+        LOG.info("We are at the end of the transform....");
         return transform;
     }
 
@@ -275,14 +275,16 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
             boolean isRowsClause,
             ExecNodeConfig config,
             RelBuilder relBuilder) {
+        boolean[] aggCallNeedRetractions = new boolean[aggCalls.size()];
+        Arrays.fill(aggCallNeedRetractions, true);
         AggregateInfoList aggInfoList =
-                AggregateUtil.transformToStreamAggregateInfoList(
+        AggregateUtil.transformToStreamAggregateInfoList(
                         // use aggInputType which considers constants as input instead of
                         // inputSchema.relDataType
                         aggInputRowType,
                         JavaScalaConversionUtil.toScala(aggCalls),
-                        new boolean[aggCalls.size()],
-                        false, // needRetraction
+                        aggCallNeedRetractions,
+                        false, // needInputCount
                         true, // isStateBackendDataViews
                         true); // needDistinctInfo
 
@@ -296,6 +298,7 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
 
         GeneratedAggsHandleFunction genAggsHandler =
                 generator
+                        .needRetract()
                         .needAccumulate()
                         // over agg code gen must pass the constants
                         .withConstants(JavaScalaConversionUtil.toScala(constants))
