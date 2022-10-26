@@ -31,6 +31,9 @@ import org.apache.flink.table.types.inference.TypeStrategies;
 import org.apache.flink.table.types.utils.DataTypeUtils;
 import org.apache.flink.util.Preconditions;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.util.List;
@@ -62,6 +65,9 @@ public abstract class BuiltInAggregateFunction<T, ACC> extends AggregateFunction
     private transient List<DataType> argumentDataTypes;
 
     private transient DataType outputDataType;
+
+    /** The logger used by its subclasses. */
+    protected static final Logger LOG = LoggerFactory.getLogger(BuiltInAggregateFunction.class);
 
     protected BuiltInAggregateFunction(
             BuiltInFunctionDefinition definition, SpecializedContext context) {

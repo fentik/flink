@@ -49,6 +49,10 @@ import org.apache.flink.shaded.curator5.com.google.common.collect.Iterables;
 
 import javax.annotation.Nullable;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -63,6 +67,9 @@ import static org.apache.flink.util.Preconditions.checkState;
 public class OneInputStreamTask<IN, OUT> extends StreamTask<OUT, OneInputStreamOperator<IN, OUT>> {
 
     @Nullable private CheckpointBarrierHandler checkpointBarrierHandler;
+
+    private static final Logger LOG = LoggerFactory.getLogger(OneInputStreamTask.class);
+
 
     private final WatermarkGauge inputWatermarkGauge = new WatermarkGauge();
 
@@ -228,6 +235,7 @@ public class OneInputStreamTask<IN, OUT> extends StreamTask<OUT, OneInputStreamO
 
         @Override
         public void emitRecord(StreamRecord<IN> record) throws Exception {
+            LOG.info("Outputting record " + record.toString());
             numRecordsIn.inc();
             operator.setKeyContextElement(record);
             operator.processElement(record);

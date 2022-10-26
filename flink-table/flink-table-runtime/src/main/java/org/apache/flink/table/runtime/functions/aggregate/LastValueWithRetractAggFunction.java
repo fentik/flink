@@ -84,6 +84,8 @@ public final class LastValueWithRetractAggFunction<T>
 
     /** Accumulator for LAST_VALUE with retraction. */
     public static class LastValueWithRetractAccumulator<T> {
+        static int UNIQUE_ID = 0;
+        int uid = ++UNIQUE_ID;
         public T lastValue = null;
         public Long lastOrder = null;
         public MapView<T, List<Long>> valueToOrderMap = new MapView<>();

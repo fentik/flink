@@ -12,23 +12,45 @@ LIB_DIR="$FLINK_DIR/lib/"
 OPT_DIR="$FLINK_DIR/opt/"
 GIT_SHA=$(git log -n 1 --format="%H" .)
 
-mvn install -DskipTests -Dfast -f fentik-udf
-mvn install -DskipTests -Dfast
+#mvn install -DskipTests -Dfast -f fentik-udf
+#mvn install -DskipTests -Dfast
 
 # Copy some required libraries that are not part of the core Flink distribution.
-cp ./flink-connectors/flink-sql-connector-kafka/target/flink-sql-connector-kafka-1.15.0.jar $LIB_DIR
-cp ./flink-table/flink-table-runtime/target/flink-table-runtime-1.15.0.jar  $LIB_DIR
-cp ./flink-metrics/flink-metrics-prometheus/target/flink-metrics-prometheus-1.15.0.jar $LIB_DIR
+#cp ./flink-connectors/flink-sql-connector-kafka/target/flink-sql-connector-kafka-1.15.0.jar $LIB_DIR
+#cp ./flink-table/flink-table-runtime/target/flink-table-runtime-1.15.0.jar  $LIB_DIR
+#cp ./flink-metrics/flink-metrics-prometheus/target/flink-metrics-prometheus-1.15.0.jar $LIB_DIR
 
 # Move flink-connector-hive jar, since it conflicts with flink-connector-files.
-mv $LIB_DIR/flink-connector-hive-1.15.0.jar $OPT_DIR
+#mv $LIB_DIR/flink-connector-hive-1.15.0.jar $OPT_DIR
 
-aws s3 cp s3://dev-dataflo/ops/ec2/flink-lib/libfb303-0.9.3.jar $LIB_DIR
-aws s3 cp s3://dev-dataflo/ops/ec2/flink-lib/hive-exec-3.1.2.jar $LIB_DIR
-aws s3 cp s3://dev-dataflo/ops/ec2/fentik-rescale-savepoint-0.1.0.jar $OPT_DIR
+#aws s3 cp s3://dev-dataflo/ops/ec2/flink-lib/libfb303-0.9.3.jar $LIB_DIR
+#aws s3 cp s3://dev-dataflo/ops/ec2/flink-lib/hive-exec-3.1.2.jar $LIB_DIR
+#aws s3 cp s3://dev-dataflo/ops/ec2/fentik-rescale-savepoint-0.1.0.jar $OPT_DIR
 
-mkdir -p $FLINK_DIR/plugins/s3-fs-presto
-cp ./flink-filesystems/flink-s3-fs-presto/target/flink-s3-fs-presto-1.15.0.jar $FLINK_DIR/plugins/s3-fs-presto/
+# mkdir -p $FLINK_DIR/plugins/s3-fs-presto
+# cp ./flink-filesystems/flink-s3-fs-presto/target/flink-s3-fs-presto-1.15.0.jar $FLINK_DIR/plugins/s3-fs-presto/
+
+# exit;
+
+    temp_dir=$(mktemp -d)
+    echo "Building Flink tarball"
+    # Note: we want the tarball to start with ./$FLINK_BASE/.
+    mkdir $temp_dir/target
+    ln -s $PWD/$FLINK_DIR $temp_dir/target/$FLINK_BASE
+    pushd $temp_dir/target
+    tar --exclude conf/flink-conf.yaml -zchf ../flink.tar.gz .
+    popd
+    cd /opt/kafka_2.13-3.0.0
+    supervisorctl -c ops/supervisord.ini stop flink-jobmanager flink-taskmanager:flink-taskmanager_00
+    cd /opt
+    rm -rf /opt/flink-1.15.0-rc1
+    tar zxf $temp_dir/flink.tar.gz --directory /opt/
+    ln -sf /Users/akhilg/Code/dataflo/python/ops/flink-config/flink-conf.dev.yaml /opt/flink-1.15.0-rc1/conf/flink-conf.yaml
+    cd /opt/kafka_2.13-3.0.0
+    supervisorctl -c ops/supervisord.ini start flink-jobmanager flink-taskmanager:flink-taskmanager_00
+
+
+exit
 
 if [ "$1" == "--package" ]; then
     # Build a Flink binary.
