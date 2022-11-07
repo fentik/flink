@@ -55,7 +55,6 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
-import java.time.format.DateTimeParseException;
 import java.time.temporal.TemporalAccessor;
 import java.time.temporal.TemporalQueries;
 import java.util.Base64;
@@ -212,14 +211,14 @@ public class JsonToRowDataConverters implements Serializable {
 
     private int convertToDate(JsonNode jsonNode) {
         String text = jsonNode.asText();
-        try {
-            LocalDate date = ISO_LOCAL_DATE.parse(text).query(TemporalQueries.localDate());
-            return (int) date.toEpochDay();
-        } catch (DateTimeParseException e) {
+        if (NumberUtils.isNumber(text)) {
             // Debezium formats date type as int32 which is number of days since epoch. Fentik sets
             // the type of these columns as DATE instead of int32, so, parse and return the value
             // directly.
             return Integer.parseInt(text);
+        } else {
+            LocalDate date = ISO_LOCAL_DATE.parse(text).query(TemporalQueries.localDate());
+            return (int) date.toEpochDay();
         }
     }
 
