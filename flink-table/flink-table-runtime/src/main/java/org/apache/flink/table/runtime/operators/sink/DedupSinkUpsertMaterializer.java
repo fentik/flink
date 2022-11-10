@@ -213,7 +213,7 @@ public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
 
             if (!removed) {
                 row.setRowKind(origRowKind);
-                LOG.warn("[SubTask Id: {}] no matching row found to retract {}",
+                LOG.debug("[SubTask Id: {}] no matching row found to retract {}",
                     getRuntimeContext().getIndexOfThisSubtask(), 
                     rowStringSerializer.asString(row));
             }
