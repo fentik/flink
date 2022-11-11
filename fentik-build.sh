@@ -43,15 +43,15 @@ if [ "$1" == "--package" ]; then
     mkdir $temp_dir/target
     ln -s $PWD/$FLINK_DIR $temp_dir/target/$FLINK_BASE
     pushd $temp_dir/target
-    echo $GIT_SHA > version
+    echo $GIT_SHA > $FLINK_BASE/version
     tar --exclude conf/flink-conf.yaml -zchf ../flink.tar.gz .
     popd
-    S3_PATH="s3://prod-dataflo/ops/ec2/flink/$GIT_SHA/"
-    S3_PATH_LATEST="s3://prod-dataflo/ops/ec2/flink/latest/"
-    aws s3 cp $temp_dir/flink.tar.gz $S3_PATH
-    aws s3 cp $temp_dir/flink.tar.gz $S3_PATH_LATEST
+    S3_PATH="s3://prod-dataflo/ops/ec2/flink/$GIT_SHA"
+    S3_PATH_LATEST="s3://prod-dataflo/ops/ec2/flink/latest"
+    aws s3 cp $temp_dir/flink.tar.gz $S3_PATH/
+    aws s3 cp $temp_dir/flink.tar.gz $S3_PATH_LATEST/
     echo $GIT_SHA | aws s3 cp - $S3_PATH_LATEST/version
     rm -rf $temp_dir
     echo "To use the new binary, update python/scripts/setup_ec2/common.sh with":
-    echo "FLINK_BINARY_PATH=$S3_PATH"
+    echo "FLINK_BINARY_GIT_SHA=\"$GIT_SHA\""
 fi
