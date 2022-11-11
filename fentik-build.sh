@@ -31,6 +31,11 @@ mkdir -p $FLINK_DIR/plugins/s3-fs-presto
 cp ./flink-filesystems/flink-s3-fs-presto/target/flink-s3-fs-presto-1.15.0.jar $FLINK_DIR/plugins/s3-fs-presto/
 
 if [ "$1" == "--package" ]; then
+    if test -n "$(git status --porcelain=v1 2>/dev/null)"; then
+        echo "Uncommitted changes found, refusing to package binary."
+        exit 1
+    fi
+
     # Build a Flink binary.
     temp_dir=$(mktemp -d)
     echo "Building Flink tarball"
@@ -38,12 +43,14 @@ if [ "$1" == "--package" ]; then
     mkdir $temp_dir/target
     ln -s $PWD/$FLINK_DIR $temp_dir/target/$FLINK_BASE
     pushd $temp_dir/target
+    echo $GIT_SHA > version
     tar --exclude conf/flink-conf.yaml -zchf ../flink.tar.gz .
     popd
-    S3_PATH="s3://prod-dataflo/ops/ec2/flink/$GIT_SHA/flink.tar.gz"
-    S3_PATH_LATEST="s3://prod-dataflo/ops/ec2/flink/latest/flink.tar.gz"
+    S3_PATH="s3://prod-dataflo/ops/ec2/flink/$GIT_SHA/"
+    S3_PATH_LATEST="s3://prod-dataflo/ops/ec2/flink/latest/"
     aws s3 cp $temp_dir/flink.tar.gz $S3_PATH
     aws s3 cp $temp_dir/flink.tar.gz $S3_PATH_LATEST
+    echo $GIT_SHA | aws s3 cp - $S3_PATH_LATEST/version
     rm -rf $temp_dir
     echo "To use the new binary, update python/scripts/setup_ec2/common.sh with":
     echo "FLINK_BINARY_PATH=$S3_PATH"
