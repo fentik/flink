@@ -12,7 +12,9 @@ import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.typeutils.ListTypeInfo;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.utils.JoinedRowData;
 import org.apache.flink.table.data.util.RowDataUtil;
+import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.runtime.generated.GeneratedRecordEqualiser;
 import org.apache.flink.table.runtime.generated.RecordEqualiser;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
@@ -49,6 +51,8 @@ public class RetractableLagFunction
 
     private static final long serialVersionUID = 1L;
     private static final Logger LOG = LoggerFactory.getLogger(RetractableLagFunction.class);
+    private final int lagOffset;
+    private final int inputFieldIdx;
 
     private final InternalTypeInfo<RowData> sortKeyType;
     private final InternalTypeInfo<RowData> inputRowType;
@@ -62,13 +66,18 @@ public class RetractableLagFunction
 
     private GeneratedRecordEqualiser generatedEqualiser;
     private RecordEqualiser equaliser;
+    private JoinedRowData outputRow;
 
     public RetractableLagFunction(
             InternalTypeInfo<RowData> inputRowType,
             ComparableRecordComparator comparableRecordComparator,
+            int lagOffset,
+            int inputFieldIdx,
             RowDataKeySelector sortKeySelector,
             GeneratedRecordEqualiser generatedEqualiser) {
         this.inputRowType = inputRowType;
+        this.lagOffset = lagOffset;
+        this.inputFieldIdx = inputFieldIdx;
         this.sortKeyType = sortKeySelector.getProducedType();
         this.sortKeySerializer = new RowDataStringSerializer(this.sortKeyType);
         this.inputRowSerializer = new RowDataStringSerializer(this.inputRowType);
@@ -90,11 +99,30 @@ public class RetractableLagFunction
                 sortKeyType, valueTypeInfo);
 
         dataState = getRuntimeContext().getMapState(mapStateDescriptor);
+
+        outputRow = new JoinedRowData();
     }
 
     @Override
     public void processElement(RowData input, Context ctx, Collector<RowData> out)
             throws Exception {
-        LOG.info("SERGEI INPUT {}", inputRowSerializer.asString(input));
+
+        boolean isAccumulate = RowDataUtil.isAccumulateMsg(input);
+
+        if (isAccumulate) {
+            LOG.info("SERGEI INPUT {}", inputRowSerializer.asString(input));
+            outputAccumulateRow(out, input, new Integer(0));
+        } else {
+            LOG.info("SERGEI INPUT {}", inputRowSerializer.asString(input));
+        }
+    }
+
+    private void outputAccumulateRow(Collector<RowData> out, RowData input, Object lagValue) {
+        GenericRowData lagRow = new GenericRowData(1);
+        lagRow.setField(0, lagValue);
+
+        outputRow.replace(input, lagRow);
+        outputRow.setRowKind(RowKind.UPDATE_AFTER);
+        out.collect(outputRow);
     }
 }

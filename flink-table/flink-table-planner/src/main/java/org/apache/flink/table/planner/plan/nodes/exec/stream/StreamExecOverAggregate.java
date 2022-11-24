@@ -136,6 +136,7 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
         super(id, context, persistedConfig, inputProperties, outputType, description);
         checkArgument(inputProperties.size() == 1);
         this.overSpec = checkNotNull(overSpec);
+        LOG.info("SERGEI output type {}", outputType);
     }
 
     @SuppressWarnings("unchecked")
@@ -157,21 +158,44 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
         final int[] partitionKeys = overSpec.getPartition().getFieldIndices();
         InternalTypeInfo<RowData> inputRowTypeInfo = InternalTypeInfo.of(inputRowType);
 
+        
+        final int[] orderKeys = group.getSort().getFieldIndices();
+        final boolean[] isAscendingOrders = group.getSort().getAscendingOrders();
+        final int orderKey = orderKeys[0];
+        final LogicalType orderKeyType = inputRowType.getFields().get(orderKey).getType();
+
+        final List<RexLiteral> constants = overSpec.getConstants();
+        final List<String> fieldNames = new ArrayList<>(inputRowType.getFieldNames());
+        final List<LogicalType> fieldTypes = new ArrayList<>(inputRowType.getChildren());
+        IntStream.range(0, constants.size()).forEach(i -> fieldNames.add("TMP" + i));
+        for (int i = 0; i < constants.size(); ++i) {
+            fieldNames.add("TMP" + i);
+            fieldTypes.add(FlinkTypeFactory.toLogicalType(constants.get(i).getType()));
+        }
+
+        final RowType aggInputRowType =
+                RowType.of(
+                        fieldTypes.toArray(new LogicalType[0]), fieldNames.toArray(new String[0]));
+
+        final CodeGeneratorContext ctx = new CodeGeneratorContext(config.getTableConfig());
+
+
         // XXX(sergei): the way I detect a LAG function here is really Janky, but that's
         // OK for now. The code will create a process function that looks very similar
         // to the RetractableTopNFunction implementation for the RANK operator. There's
         // a lot of similarity to codepath here.
         if (group.getAggCalls().get(0).getAggregation().getName() == "LAG") {
             overProcessFunction = createRetractableLagFunction(
+                                    ctx,
                                     config,
+                                    group.getAggCalls().get(0),
+                                    constants,
                                     group.getSort(),
                                     inputRowType,
-                                    inputRowTypeInfo
-                                    );
+                                    aggInputRowType,
+                                    inputRowTypeInfo);
         } else {
-            final int[] orderKeys = group.getSort().getFieldIndices();
 
-            final boolean[] isAscendingOrders = group.getSort().getAscendingOrders();
             if (orderKeys.length != 1 || isAscendingOrders.length != 1) {
                 throw new TableException("The window can only be ordered by a single time column.");
             }
@@ -188,8 +212,6 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
             }
 
 
-            final int orderKey = orderKeys[0];
-            final LogicalType orderKeyType = inputRowType.getFields().get(orderKey).getType();
             // check time field && identify window rowtime attribute
             final int rowTimeIdx;
             if (isRowtimeAttribute(orderKeyType)) {
@@ -201,20 +223,6 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
                         "OVER windows' ordering in stream mode must be defined on a time attribute instead of " + orderKeyType);
             }
 
-            final List<RexLiteral> constants = overSpec.getConstants();
-            final List<String> fieldNames = new ArrayList<>(inputRowType.getFieldNames());
-            final List<LogicalType> fieldTypes = new ArrayList<>(inputRowType.getChildren());
-            IntStream.range(0, constants.size()).forEach(i -> fieldNames.add("TMP" + i));
-            for (int i = 0; i < constants.size(); ++i) {
-                fieldNames.add("TMP" + i);
-                fieldTypes.add(FlinkTypeFactory.toLogicalType(constants.get(i).getType()));
-            }
-
-            final RowType aggInputRowType =
-                    RowType.of(
-                            fieldTypes.toArray(new LogicalType[0]), fieldNames.toArray(new String[0]));
-
-            final CodeGeneratorContext ctx = new CodeGeneratorContext(config.getTableConfig());
             if (group.getLowerBound().isPreceding()
                     && group.getLowerBound().isUnbounded()
                     && group.getUpperBound().isCurrentRow()) {
@@ -281,11 +289,47 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
     }
 
     private KeyedProcessFunction<RowData, RowData, RowData> createRetractableLagFunction(
+                CodeGeneratorContext ctx,
                 ExecNodeConfig config,
+                AggregateCall aggCall,
+                List<RexLiteral> constants,
                 SortSpec sortSpec,
-                RowType inputType,
+                RowType inputRowType,
+                RowType aggInputRowType,
                 InternalTypeInfo<RowData> inputRowTypeInfo) {
         LOG.info("SERGEI create retractable lag function");
+
+        LOG.info("SERGEI inputRowType {}", inputRowType);
+        LOG.info("SERGEI aggInputRowType {}", aggInputRowType);
+        LOG.info("SERGEI aggCall {}", aggCall);
+        LOG.info("SERGEI contants {}", constants);
+        LOG.info("SERGEI aggCall.getArgList() {}", aggCall.getArgList());
+
+
+        // XXX(sergei): in order to deal with multiple arguments, I need to add
+        // code that emulates what the AggGenerator code does since we're bypassing
+        // the code generator for for this window function; for now focus on getting
+        // core behavior dialed in.
+        //
+        // Some of this includes:
+        //   - dealing with constant input parameters
+        //   - dealing with multiple arguments
+
+        if (constants.size() > 0) {
+            throw new TableException("LAG() does not currently accept constant arguments.");
+        }
+
+        if (aggCall.getArgList().size() != 1) {
+            throw new TableException("LAG(expression) is currently the only supported syntax.");
+        }
+
+        // XXX(sergei): get the index of the input field for LAG function
+        final int inputFieldIdx = aggCall.getArgList().get(0);
+
+        // XXX(sergei): hardcode lag offset to 1 until above is resolved
+        final int lagOffset = 1;
+
+        LogicalType[] fieldTypes = inputRowType.getChildren().toArray(new LogicalType[0]);
 
         int[] sortFields = sortSpec.getFieldIndices();
         RowDataKeySelector sortKeySelector =
@@ -305,12 +349,12 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
                 ComparatorCodeGenerator.gen(
                         config.getTableConfig(),
                         "StreamExecSortComparator",
-                        RowType.of(sortSpec.getFieldTypes(inputType)),
+                        RowType.of(sortSpec.getFieldTypes(inputRowType)),
                         sortSpecInSortKey);
 
         EqualiserCodeGenerator equaliserCodeGen =
                 new EqualiserCodeGenerator(
-                         inputType.getFields().stream()
+                         inputRowType.getFields().stream()
                                  .map(RowType.RowField::getType)
                                  .toArray(LogicalType[]::new));
 
@@ -321,13 +365,15 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
                 new ComparableRecordComparator(
                         sortKeyComparator,
                         sortKeyPositions,
-                        sortSpec.getFieldTypes(inputType),
+                        sortSpec.getFieldTypes(inputRowType),
                         sortSpec.getAscendingOrders(),
                         sortSpec.getNullsIsLast());
 
         return new RetractableLagFunction(
                         inputRowTypeInfo,
                         comparator,
+                        lagOffset,
+                        inputFieldIdx,
                         sortKeySelector,
                         generatedEqualiser);
     }
