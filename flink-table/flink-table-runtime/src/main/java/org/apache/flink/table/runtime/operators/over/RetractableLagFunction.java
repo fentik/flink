@@ -15,6 +15,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.utils.JoinedRowData;
 import org.apache.flink.table.data.util.RowDataUtil;
 import org.apache.flink.table.data.GenericRowData;
+import org.apache.flink.table.runtime.generated.GeneratedRecordComparator;
 import org.apache.flink.table.runtime.generated.GeneratedRecordEqualiser;
 import org.apache.flink.table.runtime.generated.RecordEqualiser;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
@@ -38,6 +39,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -61,8 +63,16 @@ public class RetractableLagFunction
     private final TypeSerializer<RowData> inputRowSer;
     private final ComparableRecordComparator serializableComparator;
 
-    // a map state stores mapping from sort key to records list
-    private transient MapState<RowData, List<RowData>> dataState;
+    private GeneratedRecordComparator generatedSortKeyComparator;
+    protected Comparator<RowData> sortKeyComparator;
+
+
+    // a value state stores mapping from sort key to records list
+    // XXX(sergei): this requires to serialize/deserialize on every CRUD
+    // access for the state; unforutanately, Flink does not expose a
+    // a SortedMapState interface in the backend (it's something on the
+    // roadmap, but not in 1.16 or 1.15)
+    private transient ValueState<SortedMap<RowData, List<RowData>>> dataState;
 
     private GeneratedRecordEqualiser generatedEqualiser;
     private RecordEqualiser equaliser;
@@ -74,6 +84,7 @@ public class RetractableLagFunction
             int lagOffset,
             int inputFieldIdx,
             RowDataKeySelector sortKeySelector,
+            GeneratedRecordComparator generatedSortKeyComparator,
             GeneratedRecordEqualiser generatedEqualiser) {
         this.inputRowType = inputRowType;
         this.lagOffset = lagOffset;
@@ -83,6 +94,7 @@ public class RetractableLagFunction
         this.inputRowSerializer = new RowDataStringSerializer(this.inputRowType);
         this.serializableComparator = comparableRecordComparator;
         this.generatedEqualiser = generatedEqualiser;
+        this.generatedSortKeyComparator = generatedSortKeyComparator;
         this.inputRowSer = inputRowType.createSerializer(new ExecutionConfig());
     }
 
@@ -94,11 +106,19 @@ public class RetractableLagFunction
         equaliser = generatedEqualiser.newInstance(getRuntimeContext().getUserCodeClassLoader());
         generatedEqualiser = null;
 
-        ListTypeInfo<RowData> valueTypeInfo = new ListTypeInfo<>(inputRowType);
-        MapStateDescriptor<RowData, List<RowData>> mapStateDescriptor = new MapStateDescriptor<>("data-state",
-                sortKeyType, valueTypeInfo);
+        // compile comparator
+        sortKeyComparator =
+                generatedSortKeyComparator.newInstance(
+                        getRuntimeContext().getUserCodeClassLoader());
+        generatedSortKeyComparator = null;
 
-        dataState = getRuntimeContext().getMapState(mapStateDescriptor);
+        ListTypeInfo<RowData> valueTypeInfo = new ListTypeInfo<>(inputRowType);
+        ValueStateDescriptor<SortedMap<RowData, List<RowData>>> valueStateDescriptor = new ValueStateDescriptor<>(
+                "data-state",
+                new SortedMapTypeInfo<>(
+                        sortKeyType, valueTypeInfo, serializableComparator));
+
+        dataState = getRuntimeContext().getState(valueStateDescriptor);
 
         outputRow = new JoinedRowData();
     }
@@ -108,6 +128,10 @@ public class RetractableLagFunction
             throws Exception {
 
         boolean isAccumulate = RowDataUtil.isAccumulateMsg(input);
+        SortedMap<RowData, List<RowData>> sortedMap = dataState.value();
+        if (sortedMap == null) {
+            sortedMap = new TreeMap<RowData, List<RowData>>(sortKeyComparator);
+        }
 
         if (isAccumulate) {
             LOG.info("SERGEI INPUT {}", inputRowSerializer.asString(input));

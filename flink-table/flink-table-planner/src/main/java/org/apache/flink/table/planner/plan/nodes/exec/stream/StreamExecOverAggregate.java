@@ -375,6 +375,7 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
                         lagOffset,
                         inputFieldIdx,
                         sortKeySelector,
+                        sortKeyComparator,
                         generatedEqualiser);
     }
 
