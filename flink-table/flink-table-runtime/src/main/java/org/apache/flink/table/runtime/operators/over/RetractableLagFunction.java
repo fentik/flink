@@ -13,6 +13,7 @@ import org.apache.flink.api.java.typeutils.ListTypeInfo;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.utils.JoinedRowData;
 import org.apache.flink.table.data.util.RowDataUtil;
 import org.apache.flink.table.data.GenericRowData;
@@ -138,6 +139,11 @@ public class RetractableLagFunction
         RowData sortKey = sortKeySelector.getKey(input);
         boolean isAccumulate = RowDataUtil.isAccumulateMsg(input);
 
+        if (true) {
+            BinaryRowData r = (BinaryRowData) sortKey;
+            LOG.info("SERGEI sort key = {}", r.getInt(0));
+        }
+
         List<RowData> records;
         if (sortedMap.containsKey(sortKey)) {
             records = sortedMap.get(sortKey);
@@ -148,50 +154,60 @@ public class RetractableLagFunction
 
         LOG.info("SERGEI INPUT {}", inputRowSerializer.asString(input));
 
-        // Find any preceding and following records (logic reused for both
-        // additions and retractions)
-
-        RowData precedingRecord = null;
-        RowData followingRecord = null;
-
-        if (!records.isEmpty()) {
-            // current sort key has existing entries, grab the last one
-            // insert current row into the list
-            precedingRecord = records.get(records.size() - 1);
-        } else {
-            // current sort key does not have existing entries, check to see
-            // if there's a preceding entry
-            // .   headMap(K toKey)
-            // .   Returns a view of the portion of this map whose keys are strictly less than toKey.
-            SortedMap<RowData, List<RowData>> prevMap = sortedMap.headMap(sortKey);
-            if (!prevMap.isEmpty()) {
-                records = prevMap.get(prevMap.lastKey());
-                precedingRecord = records.get(records.size() - 1);
-            }
-        }
-
-        // tailMap(K fromKey)
-        // Returns a view of the portion of this map whose keys are greater than or equal to fromKey.
-        SortedMap<RowData, List<RowData>> nextMap = sortedMap.tailMap(sortKey);
-        if (!nextMap.isEmpty()) {
-            records = nextMap.get(nextMap.firstKey());
-            if (!records.isEmpty()) {
-                followingRecord = records.get(0);
-            }
-        }
-
-        if (precedingRecord != null) {
-            LOG.info("SERGEI preceding {}", inputRowSerializer.asString(precedingRecord));
-        }
-
-        if (followingRecord != null) {
-            LOG.info("SERGEI following {}", inputRowSerializer.asString(followingRecord));
-        }
-
         if (isAccumulate) {
             LOG.info("SERGEI process addition");
+
+            RowData precedingRecord = null;
+            RowData followingRecord = null;
+
+            if (!records.isEmpty()) {
+                // current sort key has existing entries, grab the last one
+                // insert current row into the list
+                precedingRecord = records.get(records.size() - 1);
+            } else {
+                // current sort key does not have existing entries, check to see
+                // if there's a preceding entry
+                // .   headMap(K toKey)
+                // .   Returns a view of the portion of this map whose keys are strictly less than toKey.
+                SortedMap<RowData, List<RowData>> prevMap = sortedMap.headMap(sortKey);
+                if (!prevMap.isEmpty()) {
+                    final List<RowData> recs = prevMap.get(prevMap.lastKey());
+                    precedingRecord = recs.get(recs.size() - 1);
+                }
+            }
+
+            // tailMap(K fromKey)
+            // Returns a view of the portion of this map whose keys are greater than or equal to fromKey.
+            SortedMap<RowData, List<RowData>> nextMap = sortedMap.tailMap(sortKey);
+            LOG.info("SERGEI nextMap = {}", nextMap);
+            if (!nextMap.isEmpty()) {
+                for (final List<RowData> recs : nextMap.values()) {
+                    if (recs.isEmpty()) {
+                        continue;
+                    }
+                    followingRecord = recs.get(0);
+                    break;
+                }
+            }
+
+            if (precedingRecord != null) {
+                LOG.info("SERGEI preceding {}", inputRowSerializer.asString(precedingRecord));
+            }
+
+            if (followingRecord != null) {
+                LOG.info("SERGEI following {}", inputRowSerializer.asString(followingRecord));
+            }
+
             records.add(input);
-            outputAccumulateRow(out, input, new Integer(0));
+
+            if (followingRecord != null) {
+                // issue a retraction for the old following record and update it
+                // with the new record state
+                out.collect(buildOutputRow(followingRecord, precedingRecord, RowKind.UPDATE_BEFORE));
+                out.collect(buildOutputRow(followingRecord, input, RowKind.UPDATE_AFTER));
+            }
+
+            out.collect(buildOutputRow(input, precedingRecord, RowKind.INSERT));
         } else {
             LOG.info("SERGEI process retract");
         }
@@ -199,12 +215,19 @@ public class RetractableLagFunction
         dataState.update(sortedMap);
     }
 
-    private void outputAccumulateRow(Collector<RowData> out, RowData input, Object lagValue) {
-        GenericRowData lagRow = new GenericRowData(1);
-        lagRow.setField(0, lagValue);
+    private RowData buildOutputRow(RowData inputRow, RowData lagRow, RowKind kind) {
+        GenericRowData lag = new GenericRowData(1);
+        lag.setField(0, extractLagValue(lagRow));
+        outputRow.replace(inputRow, lag);
+        outputRow.setRowKind(kind);
+        return outputRow;
+    }
 
-        outputRow.replace(input, lagRow);
-        outputRow.setRowKind(RowKind.UPDATE_AFTER);
-        out.collect(outputRow);
+    private Object extractLagValue(RowData row) {
+        if (row == null) {
+            return null;
+        }
+        BinaryRowData lagRow = (BinaryRowData) row;
+        return Integer.valueOf(lagRow.getInt(inputFieldIdx));
     }
 }
