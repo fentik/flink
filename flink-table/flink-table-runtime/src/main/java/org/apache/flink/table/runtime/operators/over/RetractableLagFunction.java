@@ -10,6 +10,7 @@ import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.typeutils.ListTypeInfo;
+import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.utils.JoinedRowData;
@@ -62,6 +63,7 @@ public class RetractableLagFunction
     private final RowDataStringSerializer inputRowSerializer;
     private final TypeSerializer<RowData> inputRowSer;
     private final ComparableRecordComparator serializableComparator;
+    private final KeySelector<RowData, RowData> sortKeySelector;
 
     private GeneratedRecordComparator generatedSortKeyComparator;
     protected Comparator<RowData> sortKeyComparator;
@@ -89,12 +91,13 @@ public class RetractableLagFunction
         this.inputRowType = inputRowType;
         this.lagOffset = lagOffset;
         this.inputFieldIdx = inputFieldIdx;
+        this.sortKeySelector = sortKeySelector;
         this.sortKeyType = sortKeySelector.getProducedType();
         this.sortKeySerializer = new RowDataStringSerializer(this.sortKeyType);
         this.inputRowSerializer = new RowDataStringSerializer(this.inputRowType);
         this.serializableComparator = comparableRecordComparator;
         this.generatedEqualiser = generatedEqualiser;
-        this.generatedSortKeyComparator = generatedSortKeyComparator;
+                this.generatedSortKeyComparator = generatedSortKeyComparator;
         this.inputRowSer = inputRowType.createSerializer(new ExecutionConfig());
     }
 
@@ -127,18 +130,73 @@ public class RetractableLagFunction
     public void processElement(RowData input, Context ctx, Collector<RowData> out)
             throws Exception {
 
-        boolean isAccumulate = RowDataUtil.isAccumulateMsg(input);
         SortedMap<RowData, List<RowData>> sortedMap = dataState.value();
         if (sortedMap == null) {
             sortedMap = new TreeMap<RowData, List<RowData>>(sortKeyComparator);
         }
 
+        RowData sortKey = sortKeySelector.getKey(input);
+        boolean isAccumulate = RowDataUtil.isAccumulateMsg(input);
+
+        List<RowData> records;
+        if (sortedMap.containsKey(sortKey)) {
+            records = sortedMap.get(sortKey);
+        } else {
+            records = new ArrayList<RowData>();
+            sortedMap.put(sortKey, records);
+        }
+
+        LOG.info("SERGEI INPUT {}", inputRowSerializer.asString(input));
+
+        // Find any preceding and following records (logic reused for both
+        // additions and retractions)
+
+        RowData precedingRecord = null;
+        RowData followingRecord = null;
+
+        if (!records.isEmpty()) {
+            // current sort key has existing entries, grab the last one
+            // insert current row into the list
+            precedingRecord = records.get(records.size() - 1);
+        } else {
+            // current sort key does not have existing entries, check to see
+            // if there's a preceding entry
+            // .   headMap(K toKey)
+            // .   Returns a view of the portion of this map whose keys are strictly less than toKey.
+            SortedMap<RowData, List<RowData>> prevMap = sortedMap.headMap(sortKey);
+            if (!prevMap.isEmpty()) {
+                records = prevMap.get(prevMap.lastKey());
+                precedingRecord = records.get(records.size() - 1);
+            }
+        }
+
+        // tailMap(K fromKey)
+        // Returns a view of the portion of this map whose keys are greater than or equal to fromKey.
+        SortedMap<RowData, List<RowData>> nextMap = sortedMap.tailMap(sortKey);
+        if (!nextMap.isEmpty()) {
+            records = nextMap.get(nextMap.firstKey());
+            if (!records.isEmpty()) {
+                followingRecord = records.get(0);
+            }
+        }
+
+        if (precedingRecord != null) {
+            LOG.info("SERGEI preceding {}", inputRowSerializer.asString(precedingRecord));
+        }
+
+        if (followingRecord != null) {
+            LOG.info("SERGEI following {}", inputRowSerializer.asString(followingRecord));
+        }
+
         if (isAccumulate) {
-            LOG.info("SERGEI INPUT {}", inputRowSerializer.asString(input));
+            LOG.info("SERGEI process addition");
+            records.add(input);
             outputAccumulateRow(out, input, new Integer(0));
         } else {
-            LOG.info("SERGEI INPUT {}", inputRowSerializer.asString(input));
+            LOG.info("SERGEI process retract");
         }
+
+        dataState.update(sortedMap);
     }
 
     private void outputAccumulateRow(Collector<RowData> out, RowData input, Object lagValue) {
