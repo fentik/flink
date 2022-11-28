@@ -67,7 +67,8 @@ public class RetractableLagFunction
     private final KeySelector<RowData, RowData> sortKeySelector;
 
     private GeneratedRecordComparator generatedSortKeyComparator;
-    protected Comparator<RowData> sortKeyComparator;
+    private Comparator<RowData> sortKeyComparator;
+    private RowData.FieldGetter lagFieldGetter;
 
 
     // a value state stores mapping from sort key to records list
@@ -100,7 +101,11 @@ public class RetractableLagFunction
         this.generatedEqualiser = generatedEqualiser;
                 this.generatedSortKeyComparator = generatedSortKeyComparator;
         this.inputRowSer = inputRowType.createSerializer(new ExecutionConfig());
+        this.lagFieldGetter = RowData.createFieldGetter(
+            inputRowType.toRowType().getTypeAt(inputFieldIdx),
+            inputFieldIdx);
     }
+            
 
     @Override
     public void open(Configuration parameters) throws Exception {
@@ -154,50 +159,50 @@ public class RetractableLagFunction
 
         LOG.info("SERGEI INPUT {}", inputRowSerializer.asString(input));
 
+
+        RowData precedingRecord = null;
+        RowData followingRecord = null;
+
+        if (!records.isEmpty()) {
+            // current sort key has existing entries, grab the last one
+            // insert current row into the list
+            precedingRecord = records.get(records.size() - 1);
+        } else {
+            // current sort key does not have existing entries, check to see
+            // if there's a preceding entry
+            // .   headMap(K toKey)
+            // .   Returns a view of the portion of this map whose keys are strictly less than toKey.
+            SortedMap<RowData, List<RowData>> prevMap = sortedMap.headMap(sortKey);
+            if (!prevMap.isEmpty()) {
+                final List<RowData> recs = prevMap.get(prevMap.lastKey());
+                precedingRecord = recs.get(recs.size() - 1);
+            }
+        }
+
+        // tailMap(K fromKey)
+        // Returns a view of the portion of this map whose keys are greater than or equal to fromKey.
+        SortedMap<RowData, List<RowData>> nextMap = sortedMap.tailMap(sortKey);
+        LOG.info("SERGEI nextMap = {}", nextMap);
+        if (!nextMap.isEmpty()) {
+            for (final List<RowData> recs : nextMap.values()) {
+                if (recs.isEmpty()) {
+                    continue;
+                }
+                followingRecord = recs.get(0);
+                break;
+            }
+        }
+
+        if (precedingRecord != null) {
+            LOG.info("SERGEI preceding {}", inputRowSerializer.asString(precedingRecord));
+        }
+
+        if (followingRecord != null) {
+            LOG.info("SERGEI following {}", inputRowSerializer.asString(followingRecord));
+        }
+
         if (isAccumulate) {
             LOG.info("SERGEI process addition");
-
-            RowData precedingRecord = null;
-            RowData followingRecord = null;
-
-            if (!records.isEmpty()) {
-                // current sort key has existing entries, grab the last one
-                // insert current row into the list
-                precedingRecord = records.get(records.size() - 1);
-            } else {
-                // current sort key does not have existing entries, check to see
-                // if there's a preceding entry
-                // .   headMap(K toKey)
-                // .   Returns a view of the portion of this map whose keys are strictly less than toKey.
-                SortedMap<RowData, List<RowData>> prevMap = sortedMap.headMap(sortKey);
-                if (!prevMap.isEmpty()) {
-                    final List<RowData> recs = prevMap.get(prevMap.lastKey());
-                    precedingRecord = recs.get(recs.size() - 1);
-                }
-            }
-
-            // tailMap(K fromKey)
-            // Returns a view of the portion of this map whose keys are greater than or equal to fromKey.
-            SortedMap<RowData, List<RowData>> nextMap = sortedMap.tailMap(sortKey);
-            LOG.info("SERGEI nextMap = {}", nextMap);
-            if (!nextMap.isEmpty()) {
-                for (final List<RowData> recs : nextMap.values()) {
-                    if (recs.isEmpty()) {
-                        continue;
-                    }
-                    followingRecord = recs.get(0);
-                    break;
-                }
-            }
-
-            if (precedingRecord != null) {
-                LOG.info("SERGEI preceding {}", inputRowSerializer.asString(precedingRecord));
-            }
-
-            if (followingRecord != null) {
-                LOG.info("SERGEI following {}", inputRowSerializer.asString(followingRecord));
-            }
-
             records.add(input);
 
             if (followingRecord != null) {
@@ -227,7 +232,6 @@ public class RetractableLagFunction
         if (row == null) {
             return null;
         }
-        BinaryRowData lagRow = (BinaryRowData) row;
-        return Integer.valueOf(lagRow.getInt(inputFieldIdx));
+        return lagFieldGetter.getFieldOrNull(row);
     }
 }
