@@ -165,7 +165,6 @@ public class RetractableLagFunction
 
         if (!records.isEmpty()) {
             // current sort key has existing entries, grab the last one
-            // insert current row into the list
             precedingRecord = records.get(records.size() - 1);
         } else {
             // current sort key does not have existing entries, check to see
@@ -215,6 +214,10 @@ public class RetractableLagFunction
             out.collect(buildOutputRow(input, precedingRecord, RowKind.INSERT));
         } else {
             LOG.info("SERGEI process retract");
+
+            if (followingRecord != null) {
+
+            }
         }
 
         dataState.update(sortedMap);

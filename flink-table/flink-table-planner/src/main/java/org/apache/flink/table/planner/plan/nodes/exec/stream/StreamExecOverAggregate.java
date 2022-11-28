@@ -136,7 +136,6 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
         super(id, context, persistedConfig, inputProperties, outputType, description);
         checkArgument(inputProperties.size() == 1);
         this.overSpec = checkNotNull(overSpec);
-        LOG.info("SERGEI output type {}", outputType);
     }
 
     @SuppressWarnings("unchecked")
@@ -297,30 +296,23 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
                 RowType inputRowType,
                 RowType aggInputRowType,
                 InternalTypeInfo<RowData> inputRowTypeInfo) {
-        LOG.info("SERGEI create retractable lag function");
+        LOG.debug("SERGEI create retractable lag function");
 
-        LOG.info("SERGEI inputRowType {}", inputRowType);
-        LOG.info("SERGEI aggInputRowType {}", aggInputRowType);
-        LOG.info("SERGEI aggCall {}", aggCall);
-        LOG.info("SERGEI contants {}", constants);
-        LOG.info("SERGEI aggCall.getArgList() {}", aggCall.getArgList());
+        LOG.debug("SERGEI inputRowType {}", inputRowType);
+        LOG.debug("SERGEI aggInputRowType {}", aggInputRowType);
+        LOG.debug("SERGEI aggCall {}", aggCall);
+        LOG.debug("SERGEI contants {}", constants);
+        LOG.debug("SERGEI aggCall.getArgList() {}", aggCall.getArgList());
 
 
-        // XXX(sergei): in order to deal with multiple arguments, I need to add
-        // code that emulates what the AggGenerator code does since we're bypassing
-        // the code generator for for this window function; for now focus on getting
-        // core behavior dialed in.
-        //
-        // Some of this includes:
-        //   - dealing with constant input parameters
-        //   - dealing with multiple arguments
+        // XXX(sergei): our implementation does not support custom offsets yet
+
+        if (aggCall.getArgList().size() != 1) {
+            throw new TableException("LAG(expression) is currently the only supported syntax (offset=1 and default NULL).");
+        }
 
         if (constants.size() > 0) {
             throw new TableException("LAG() does not currently accept constant arguments.");
-        }
-
-        if (aggCall.getArgList().size() != 1) {
-            throw new TableException("LAG(expression) is currently the only supported syntax.");
         }
 
         // XXX(sergei): get the index of the input field for LAG function
@@ -348,7 +340,7 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
         GeneratedRecordComparator sortKeyComparator =
                 ComparatorCodeGenerator.gen(
                         config.getTableConfig(),
-                        "StreamExecSortComparator",
+                        "StreamExecOverAggregateOrderByComparator",
                         RowType.of(sortSpec.getFieldTypes(inputRowType)),
                         sortSpecInSortKey);
 
