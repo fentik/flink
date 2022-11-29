@@ -216,7 +216,9 @@ public class RetractableLagFunction
             } else if (records.isEmpty()) {
                 // remove empty list for this SortKey
                 sortedMap.remove(sortKey);
-            } else {
+            }
+
+            if (followingRecord == null) {
                 // tailMap(K fromKey)
                 // Returns a view of the portion of this map whose keys are greater than or equal to fromKey.
                 SortedMap<RowData, List<RowData>> nextMap = sortedMap.tailMap(sortKey);
