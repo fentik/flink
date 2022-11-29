@@ -181,6 +181,7 @@ public class RetractableLagFunction
             for (RowData row : records) {
                 if (equaliser.equals(row, input)) {
                     found = true;
+                    break;
                 }
                 idx++;
             }
