@@ -144,11 +144,6 @@ public class RetractableLagFunction
         RowData sortKey = sortKeySelector.getKey(input);
         boolean isAccumulate = RowDataUtil.isAccumulateMsg(input);
 
-        if (true) {
-            BinaryRowData r = (BinaryRowData) sortKey;
-            LOG.info("SERGEI sort key = {}", r.getInt(0));
-        }
-
         List<RowData> records;
         if (sortedMap.containsKey(sortKey)) {
             records = sortedMap.get(sortKey);
@@ -157,51 +152,40 @@ public class RetractableLagFunction
             sortedMap.put(sortKey, records);
         }
 
-        LOG.info("SERGEI INPUT {}", inputRowSerializer.asString(input));
-
+        LOG.debug("SERGEI INPUT {}", inputRowSerializer.asString(input));
 
         RowData precedingRecord = null;
         RowData followingRecord = null;
 
-        if (!records.isEmpty()) {
-            // current sort key has existing entries, grab the last one
-            precedingRecord = records.get(records.size() - 1);
-        } else {
-            // current sort key does not have existing entries, check to see
-            // if there's a preceding entry
-            // .   headMap(K toKey)
-            // .   Returns a view of the portion of this map whose keys are strictly less than toKey.
-            SortedMap<RowData, List<RowData>> prevMap = sortedMap.headMap(sortKey);
-            if (!prevMap.isEmpty()) {
-                final List<RowData> recs = prevMap.get(prevMap.lastKey());
-                precedingRecord = recs.get(recs.size() - 1);
-            }
-        }
-
-        // tailMap(K fromKey)
-        // Returns a view of the portion of this map whose keys are greater than or equal to fromKey.
-        SortedMap<RowData, List<RowData>> nextMap = sortedMap.tailMap(sortKey);
-        LOG.info("SERGEI nextMap = {}", nextMap);
-        if (!nextMap.isEmpty()) {
-            for (final List<RowData> recs : nextMap.values()) {
-                if (recs.isEmpty()) {
-                    continue;
-                }
-                followingRecord = recs.get(0);
-                break;
-            }
-        }
-
-        if (precedingRecord != null) {
-            LOG.info("SERGEI preceding {}", inputRowSerializer.asString(precedingRecord));
-        }
-
-        if (followingRecord != null) {
-            LOG.info("SERGEI following {}", inputRowSerializer.asString(followingRecord));
-        }
-
         if (isAccumulate) {
-            LOG.info("SERGEI process addition");
+            if (!records.isEmpty()) {
+                // current sort key has existing entries, grab the last one
+                precedingRecord = records.get(records.size() - 1);
+            } else {
+                // current sort key does not have existing entries, check to see
+                // if there's a preceding entry
+                // .   headMap(K toKey)
+                // .   Returns a view of the portion of this map whose keys are strictly less than toKey.
+                SortedMap<RowData, List<RowData>> prevMap = sortedMap.headMap(sortKey);
+                if (!prevMap.isEmpty()) {
+                    final List<RowData> recs = prevMap.get(prevMap.lastKey());
+                    precedingRecord = recs.get(recs.size() - 1);
+                }
+            }
+
+            // tailMap(K fromKey)
+            // Returns a view of the portion of this map whose keys are greater than or equal to fromKey.
+            SortedMap<RowData, List<RowData>> nextMap = sortedMap.tailMap(sortKey);
+            if (!nextMap.isEmpty()) {
+                for (final List<RowData> recs : nextMap.values()) {
+                    if (recs.isEmpty()) {
+                        continue;
+                    }
+                    followingRecord = recs.get(0);
+                    break;
+                }
+            }
+
             records.add(input);
 
             if (followingRecord != null) {
@@ -213,11 +197,7 @@ public class RetractableLagFunction
 
             out.collect(buildOutputRow(input, precedingRecord, RowKind.INSERT));
         } else {
-            LOG.info("SERGEI process retract");
-
-            if (followingRecord != null) {
-
-            }
+            throw new Exception("RetactableLagFunction: retractions not coded yet");
         }
 
         dataState.update(sortedMap);
