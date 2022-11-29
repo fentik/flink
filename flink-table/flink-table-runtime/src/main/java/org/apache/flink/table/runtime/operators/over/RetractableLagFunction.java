@@ -99,7 +99,7 @@ public class RetractableLagFunction
         this.inputRowSerializer = new RowDataStringSerializer(this.inputRowType);
         this.serializableComparator = comparableRecordComparator;
         this.generatedEqualiser = generatedEqualiser;
-                this.generatedSortKeyComparator = generatedSortKeyComparator;
+        this.generatedSortKeyComparator = generatedSortKeyComparator;
         this.inputRowSer = inputRowType.createSerializer(new ExecutionConfig());
         this.lagFieldGetter = RowData.createFieldGetter(
             inputRowType.toRowType().getTypeAt(inputFieldIdx),
@@ -143,6 +143,9 @@ public class RetractableLagFunction
 
         RowData sortKey = sortKeySelector.getKey(input);
         boolean isAccumulate = RowDataUtil.isAccumulateMsg(input);
+
+        // normalize input type for comparisons
+        input.setRowKind(RowKind.INSERT);
 
         List<RowData> records;
         if (sortedMap.containsKey(sortKey)) {
@@ -197,7 +200,69 @@ public class RetractableLagFunction
 
             out.collect(buildOutputRow(input, precedingRecord, RowKind.INSERT));
         } else {
-            throw new Exception("RetactableLagFunction: retractions not coded yet");
+            int idx = 0;
+            boolean found = false;
+
+            for (RowData row : records) {
+                if (equaliser.equals(row, input)) {
+                    found = true;
+                }
+                idx++;
+            }
+
+            if (!found) {
+                throw new Exception("RetactableLagFunction: input row not found in state: "
+                                     + inputRowSerializer.asString(input));
+            }
+
+            if (idx > 0) {
+                // preceding value found in current sort key, grab it
+                precedingRecord = records.get(idx - 1);
+            } else {
+                // current sort key does not have existing entries, check to see
+                // if there's a preceding entry
+                // .   headMap(K toKey)
+                // .   Returns a view of the portion of this map whose keys are strictly less than toKey.
+                SortedMap<RowData, List<RowData>> prevMap = sortedMap.headMap(sortKey);
+                if (!prevMap.isEmpty()) {
+                    final List<RowData> recs = prevMap.get(prevMap.lastKey());
+                    precedingRecord = recs.get(recs.size() - 1);
+                }
+            }
+
+            records.remove(input);
+
+            // NOTE: we've altered the records array in the line above, if the list entry is non-zero
+            // then the following record will be at the same index as the removed input
+
+            if (idx < records.size()) {
+                // following value found in the current sort key, grab it
+                followingRecord = records.get(idx);
+            } else if (records.isEmpty()) {
+                // remove empty list for this SortKey
+                sortedMap.remove(sortKey);
+            } else {
+                // tailMap(K fromKey)
+                // Returns a view of the portion of this map whose keys are greater than or equal to fromKey.
+                SortedMap<RowData, List<RowData>> nextMap = sortedMap.tailMap(sortKey);
+                if (!nextMap.isEmpty()) {
+                    for (final List<RowData> recs : nextMap.values()) {
+                        if (recs.isEmpty()) {
+                            throw new Exception("RetactableLagFunction: must not have empty list in state: "
+                                                + inputRowSerializer.asString(input));
+                        }
+                        followingRecord = recs.get(0);
+                        break;
+                    }
+                }
+            }
+
+            out.collect(buildOutputRow(input, precedingRecord, RowKind.DELETE));
+
+            if (followingRecord != null) {
+                out.collect(buildOutputRow(followingRecord, input, RowKind.UPDATE_BEFORE));
+                out.collect(buildOutputRow(followingRecord, precedingRecord, RowKind.UPDATE_AFTER));
+            }
         }
 
         dataState.update(sortedMap);
