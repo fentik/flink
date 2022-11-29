@@ -364,7 +364,6 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
         return new RetractableLagFunction(
                         inputRowTypeInfo,
                         comparator,
-                        lagOffset,
                         inputFieldIdx,
                         sortKeySelector,
                         sortKeyComparator,
