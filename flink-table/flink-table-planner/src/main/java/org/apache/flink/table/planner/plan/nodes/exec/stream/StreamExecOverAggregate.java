@@ -182,11 +182,18 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
         // OK for now. The code will create a process function that looks very similar
         // to the RetractableTopNFunction implementation for the RANK operator. There's
         // a lot of similarity to codepath here.
-        if (group.getAggCalls().get(0).getAggregation().getName() == "LAG") {
+        boolean lagOnly = true;
+        for (AggregateCall agg : group.getAggCalls()) {
+            if (agg.getAggregation().getName() != "LAG") {
+                lagOnly = false;
+                break;
+            }
+        }
+        if (lagOnly) {
             overProcessFunction = createRetractableLagFunction(
                                     ctx,
                                     config,
-                                    group.getAggCalls().get(0),
+                                    group.getAggCalls(),
                                     constants,
                                     group.getSort(),
                                     inputRowType,
@@ -289,7 +296,7 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
     private KeyedProcessFunction<RowData, RowData, RowData> createRetractableLagFunction(
                 CodeGeneratorContext ctx,
                 ExecNodeConfig config,
-                AggregateCall aggCall,
+                List<AggregateCall> aggCalls,
                 List<RexLiteral> constants,
                 SortSpec sortSpec,
                 RowType inputRowType,
@@ -299,23 +306,24 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
 
         LOG.debug("SERGEI inputRowType {}", inputRowType);
         LOG.debug("SERGEI aggInputRowType {}", aggInputRowType);
-        LOG.debug("SERGEI aggCall {}", aggCall);
+        LOG.debug("SERGEI aggCalls {}", aggCalls);
         LOG.debug("SERGEI contants {}", constants);
-        LOG.debug("SERGEI aggCall.getArgList() {}", aggCall.getArgList());
 
+        List<Integer> inputFieldIdxs = new ArrayList<Integer>();
 
         // XXX(sergei): our implementation does not support custom offsets yet
+        for (AggregateCall aggCall : aggCalls) {
+            if (aggCall.getArgList().size() != 1) {
+                throw new TableException("LAG(expression) is currently the only supported syntax (offset=1 and default NULL).");
+            }
 
-        if (aggCall.getArgList().size() != 1) {
-            throw new TableException("LAG(expression) is currently the only supported syntax (offset=1 and default NULL).");
+            if (constants.size() > 0) {
+                throw new TableException("LAG() does not currently accept constant arguments.");
+            }
+
+            // XXX(sergei): first argument is the index into the input row
+            inputFieldIdxs.add(Integer.valueOf(aggCall.getArgList().get(0)));
         }
-
-        if (constants.size() > 0) {
-            throw new TableException("LAG() does not currently accept constant arguments.");
-        }
-
-        // XXX(sergei): get the index of the input field for LAG function
-        final int inputFieldIdx = aggCall.getArgList().get(0);
 
         // XXX(sergei): hardcode lag offset to 1 until above is resolved
         final int lagOffset = 1;
@@ -363,7 +371,7 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
         return new RetractableLagFunction(
                         inputRowTypeInfo,
                         comparator,
-                        inputFieldIdx,
+                        inputFieldIdxs,
                         sortKeySelector,
                         sortKeyComparator,
                         generatedEqualiser);

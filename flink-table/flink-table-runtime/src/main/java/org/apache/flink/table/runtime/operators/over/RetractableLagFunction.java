@@ -47,7 +47,7 @@ public class RetractableLagFunction
 
     private GeneratedRecordComparator generatedSortKeyComparator;
     private Comparator<RowData> sortKeyComparator;
-    private RowData.FieldGetter lagFieldGetter;
+    private List<RowData.FieldGetter> lagFieldGetters;
 
 
     // a value state stores mapping from sort key to records list
@@ -64,7 +64,7 @@ public class RetractableLagFunction
     public RetractableLagFunction(
             InternalTypeInfo<RowData> inputRowType,
             ComparableRecordComparator comparableRecordComparator,
-            int inputFieldIdx,
+            List<Integer> inputFieldIdxs,
             RowDataKeySelector sortKeySelector,
             GeneratedRecordComparator generatedSortKeyComparator,
             GeneratedRecordEqualiser generatedEqualiser) {
@@ -76,9 +76,13 @@ public class RetractableLagFunction
         this.serializableComparator = comparableRecordComparator;
         this.generatedEqualiser = generatedEqualiser;
         this.generatedSortKeyComparator = generatedSortKeyComparator;
-        this.lagFieldGetter = RowData.createFieldGetter(
-            inputRowType.toRowType().getTypeAt(inputFieldIdx),
-            inputFieldIdx);
+        this.lagFieldGetters = new ArrayList<RowData.FieldGetter>();
+        for (Integer lagFieldIdx : inputFieldIdxs) {
+            this.lagFieldGetters.add(
+                RowData.createFieldGetter(
+                    inputRowType.toRowType().getTypeAt(lagFieldIdx),
+                    lagFieldIdx));
+        }
     }
             
 
@@ -247,14 +251,18 @@ public class RetractableLagFunction
     }
 
     private RowData buildOutputRow(RowData inputRow, RowData lagRow, RowKind kind) {
-        GenericRowData lag = new GenericRowData(1);
-        lag.setField(0, extractLagValue(lagRow));
+        GenericRowData lag = new GenericRowData(lagFieldGetters.size());
+        int idx = 0;
+        for (RowData.FieldGetter lagFieldGetter : lagFieldGetters) {
+            lag.setField(idx, extractLagValue(lagRow, lagFieldGetter));
+            idx++;
+        }
         outputRow.replace(inputRow, lag);
         outputRow.setRowKind(kind);
         return outputRow;
     }
 
-    private Object extractLagValue(RowData row) {
+    private Object extractLagValue(RowData row, RowData.FieldGetter lagFieldGetter) {
         if (row == null) {
             return null;
         }
