@@ -66,6 +66,7 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.runtime.operators.over.RetractableLagFunction;
+import org.apache.flink.table.runtime.operators.over.OverAggregateFunction;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
@@ -106,6 +107,9 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
 
     @JsonProperty(FIELD_NAME_OVER_SPEC)
     private final OverSpec overSpec;
+
+    // XXX(sergei): parameterize this
+    private final boolean useGenericOverAggregate = true;
 
     public StreamExecOverAggregate(
             ReadableConfig tableConfig,
@@ -156,12 +160,6 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
         final int[] partitionKeys = overSpec.getPartition().getFieldIndices();
         InternalTypeInfo<RowData> inputRowTypeInfo = InternalTypeInfo.of(inputRowType);
 
-        
-        final int[] orderKeys = group.getSort().getFieldIndices();
-        final boolean[] isAscendingOrders = group.getSort().getAscendingOrders();
-        final int orderKey = orderKeys[0];
-        final LogicalType orderKeyType = inputRowType.getFields().get(orderKey).getType();
-
         final List<RexLiteral> constants = overSpec.getConstants();
         final List<String> fieldNames = new ArrayList<>(inputRowType.getFieldNames());
         final List<LogicalType> fieldTypes = new ArrayList<>(inputRowType.getChildren());
@@ -182,14 +180,18 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
         // OK for now. The code will create a process function that looks very similar
         // to the RetractableTopNFunction implementation for the RANK operator. There's
         // a lot of similarity to codepath here.
-        boolean lagOnly = true;
+        int numLagAggs = 0;
         for (AggregateCall agg : group.getAggCalls()) {
-            if (agg.getAggregation().getName() != "LAG") {
-                lagOnly = false;
-                break;
+            if (agg.getAggregation().getName() == "LAG") {
+                numLagAggs++;
             }
         }
-        if (lagOnly) {
+        if (numLagAggs > 0) {
+            // XXX(sergei): need to merge the two implementation, but for now keep things
+            // simpler and create two separate code paths
+            if (numLagAggs != group.getAggCalls().size()) {
+                throw new TableException("Mixing LAG and non-LAG aggregate functions is not supported yet.");
+            }
             overProcessFunction = createRetractableLagFunction(
                                     ctx,
                                     config,
@@ -199,7 +201,23 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
                                     inputRowType,
                                     aggInputRowType,
                                     inputRowTypeInfo);
+        } else if (useGenericOverAggregate) {
+            overProcessFunction = createGenericOverAggregateFunction(
+                                    ctx,
+                                    config,
+                                    group.getAggCalls(),
+                                    constants,
+                                    group.getSort(),
+                                    inputRowType,
+                                    aggInputRowType,
+                                    inputRowTypeInfo,
+                                    planner.getRelBuilder());
         } else {
+            final int[] orderKeys = group.getSort().getFieldIndices();
+            final boolean[] isAscendingOrders = group.getSort().getAscendingOrders();
+            final int orderKey = orderKeys[0];
+            final LogicalType orderKeyType = inputRowType.getFields().get(orderKey).getType();
+    
 
             if (orderKeys.length != 1 || isAscendingOrders.length != 1) {
                 throw new TableException("The window can only be ordered by a single time column.");
@@ -291,6 +309,68 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
         transform.setStateKeyType(selector.getProducedType());
 
         return transform;
+    }
+
+    private KeyedProcessFunction<RowData, RowData, RowData> createGenericOverAggregateFunction(
+                CodeGeneratorContext ctx,
+                ExecNodeConfig config,
+                List<AggregateCall> aggCalls,
+                List<RexLiteral> constants,
+                SortSpec sortSpec,
+                RowType inputRowType,
+                RowType aggInputRowType,
+                InternalTypeInfo<RowData> inputRowTypeInfo,
+                RelBuilder relBuilder) {
+
+        boolean[] aggCallNeedRetractions = new boolean[aggCalls.size()];
+        Arrays.fill(aggCallNeedRetractions, true);
+
+        AggregateInfoList aggInfoList =
+                AggregateUtil.transformToStreamAggregateInfoList(
+                        // use aggInputType which considers constants as input instead of
+                        // inputSchema.relDataType
+                        aggInputRowType,
+                        JavaScalaConversionUtil.toScala(aggCalls),
+                        aggCallNeedRetractions,
+                        true, // needRetraction
+                        true, // isStateBackendDataViews
+                        true); // needDistinctInfo
+
+        LogicalType[] fieldTypes = inputRowType.getChildren().toArray(new LogicalType[0]);
+        AggsHandlerCodeGenerator generator =
+                new AggsHandlerCodeGenerator(
+                        ctx,
+                        relBuilder,
+                        JavaScalaConversionUtil.toScala(Arrays.asList(fieldTypes)),
+                        false); // copyInputField
+    
+        GeneratedAggsHandleFunction genAggsHandler =
+                generator
+                        .needAccumulate()
+                        .needRetract()
+                        // over agg code gen must pass the constants
+                        .withConstants(JavaScalaConversionUtil.toScala(constants))
+                        .generateAggsHandler("GenericOverAggregateHelper", aggInfoList);
+    
+        LogicalType[] flattenAccTypes =
+                Arrays.stream(aggInfoList.getAccTypes())
+                        .map(LogicalTypeDataTypeConverter::fromDataTypeToLogicalType)
+                        .toArray(LogicalType[]::new);
+
+        EqualiserCodeGenerator equaliserCodeGen =
+                new EqualiserCodeGenerator(
+                        inputRowType.getFields().stream()
+                                .map(RowType.RowField::getType)
+                                .toArray(LogicalType[]::new));
+        
+        GeneratedRecordEqualiser generatedEqualiser =
+                equaliserCodeGen.generateRecordEqualiser("OverAggregateEqualiser");
+
+        return new OverAggregateFunction(
+                inputRowTypeInfo,
+                genAggsHandler,
+                flattenAccTypes,
+                generatedEqualiser);
     }
 
     private KeyedProcessFunction<RowData, RowData, RowData> createRetractableLagFunction(
