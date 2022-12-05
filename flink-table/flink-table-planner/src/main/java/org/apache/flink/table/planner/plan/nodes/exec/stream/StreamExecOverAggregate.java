@@ -25,6 +25,7 @@ import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.streaming.api.operators.KeyedProcessOperator;
 import org.apache.flink.streaming.api.transformations.OneInputTransformation;
 import org.apache.flink.table.api.TableException;
+import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.planner.calcite.FlinkTypeFactory;
 import org.apache.flink.table.planner.codegen.CodeGeneratorContext;
@@ -322,6 +323,8 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
                 InternalTypeInfo<RowData> inputRowTypeInfo,
                 RelBuilder relBuilder) {
 
+        final boolean isBatchBackfillEnabled = config.get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL);
+
         boolean[] aggCallNeedRetractions = new boolean[aggCalls.size()];
         Arrays.fill(aggCallNeedRetractions, true);
 
@@ -370,7 +373,8 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
                 inputRowTypeInfo,
                 genAggsHandler,
                 flattenAccTypes,
-                generatedEqualiser);
+                generatedEqualiser,
+                isBatchBackfillEnabled);
     }
 
     private KeyedProcessFunction<RowData, RowData, RowData> createRetractableLagFunction(

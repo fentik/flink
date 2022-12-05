@@ -9,6 +9,8 @@ import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.typeutils.ListTypeInfo;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.runtime.state.VoidNamespace;
+import org.apache.flink.runtime.state.VoidNamespaceSerializer;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.utils.JoinedRowData;
 import org.apache.flink.table.data.util.RowDataUtil;
@@ -30,6 +32,9 @@ import org.apache.flink.table.runtime.dataview.PerKeyStateDataViewStore;
 import static org.apache.flink.table.data.util.RowDataUtil.isAccumulateMsg;
 import static org.apache.flink.table.data.util.RowDataUtil.isRetractMsg;
 import org.apache.flink.table.runtime.operators.aggregate.RecordCounter;
+
+import org.apache.flink.runtime.state.KeyedStateBackend;
+import org.apache.flink.runtime.state.KeyedStateFunction;
 
 import org.apache.flink.table.runtime.util.RowDataStringSerializer;
 
@@ -63,8 +68,7 @@ public class OverAggregateFunction
 
     private JoinedRowData outputRow;
 
-    // XXX(sergei): batch mode not supported yet
-    private final boolean isStreamMode = true;
+    private boolean isStreamMode;
 
     // XXX(sergei): we do not support count(*) yet
     private final int indexOfCountStar = -1;
@@ -73,7 +77,8 @@ public class OverAggregateFunction
             InternalTypeInfo<RowData> inputRowType,
             GeneratedAggsHandleFunction genAggsHandler,
             LogicalType[] accTypes,
-            GeneratedRecordEqualiser generatedEqualiser
+            GeneratedRecordEqualiser generatedEqualiser,
+            boolean isBatchBackfillEnabled
         ) {
         this.inputRowType = inputRowType;
         this.accTypes = accTypes;
@@ -81,6 +86,7 @@ public class OverAggregateFunction
         this.generatedEqualiser = generatedEqualiser;
         this.recordCounter = RecordCounter.of(indexOfCountStar);
         this.inputRowSerializer = new RowDataStringSerializer(this.inputRowType);
+        this.isStreamMode = !isBatchBackfillEnabled;
     }
             
 
@@ -106,6 +112,59 @@ public class OverAggregateFunction
 
         outputRow = new JoinedRowData();
     }
+
+    @Override
+    public boolean isHybridStreamBatchCapable() {
+        return true;
+    }
+
+    public boolean isBatchMode() {
+        return !this.isStreamMode;
+    }
+
+    private String getPrintableName() {
+        return getRuntimeContext().getJobId() + " " + getRuntimeContext().getTaskName();
+    }
+
+    public void emitStateAndSwitchToStreaming(Context ctx, Collector<RowData> out,
+                    KeyedStateBackend<RowData> be) throws Exception {
+        if (isStreamMode) {
+            LOG.warn("Programming error in {} -- asked to switch to streaming while not in batch mode",
+                        getPrintableName());
+            return;
+        }
+
+        LOG.info("{} transitioning from Batch to Stream mode", getPrintableName());
+
+        ListStateDescriptor<RowData> listStateDesc =
+            new ListStateDescriptor<RowData>("listState", inputRowType);
+
+        be.applyToAllKeys(VoidNamespace.INSTANCE,
+                VoidNamespaceSerializer.INSTANCE,
+                listStateDesc,
+                new KeyedStateFunction<RowData, ListState<RowData>>() {
+                    @Override
+                    public void process(RowData key, ListState<RowData> listState) throws Exception {
+                        // The access to dataState.get() below requires a current key
+                        // set for partioned stream operators.
+                        be.setCurrentKey(key);
+
+                        RowData accumulators = accState.value();
+                        function.setAccumulators(accumulators);
+                        RowData aggValue = function.getValue();
+
+                        for (RowData row : listState.get()) {
+                            outputRow.replace(row, aggValue).setRowKind(RowKind.INSERT);
+                            out.collect(outputRow);
+                        }
+                    }
+                });
+
+        LOG.info("{} transitioned to Stream mode", getPrintableName());
+
+        isStreamMode = true;
+    }
+
 
     @Override
     public void processElement(RowData input, Context ctx, Collector<RowData> out)
