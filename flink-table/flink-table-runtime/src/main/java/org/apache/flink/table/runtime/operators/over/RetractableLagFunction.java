@@ -22,6 +22,10 @@ import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Collector;
 import org.apache.flink.table.runtime.operators.rank.ComparableRecordComparator;
 
+import org.apache.flink.runtime.state.KeyedStateBackend;
+import org.apache.flink.runtime.state.KeyedStateFunction;
+import org.apache.flink.runtime.state.VoidNamespace;
+import org.apache.flink.runtime.state.VoidNamespaceSerializer;
 import org.apache.flink.table.runtime.util.RowDataStringSerializer;
 
 import org.slf4j.Logger;
@@ -60,6 +64,7 @@ public class RetractableLagFunction
     private GeneratedRecordEqualiser generatedEqualiser;
     private RecordEqualiser equaliser;
     private JoinedRowData outputRow;
+    private boolean isStreamMode;
 
     public RetractableLagFunction(
             InternalTypeInfo<RowData> inputRowType,
@@ -67,7 +72,8 @@ public class RetractableLagFunction
             List<Integer> inputFieldIdxs,
             RowDataKeySelector sortKeySelector,
             GeneratedRecordComparator generatedSortKeyComparator,
-            GeneratedRecordEqualiser generatedEqualiser) {
+            GeneratedRecordEqualiser generatedEqualiser,
+            boolean isBatchBackfillEnabled) {
 
         this.inputRowType = inputRowType;
         this.sortKeySelector = sortKeySelector;
@@ -77,6 +83,7 @@ public class RetractableLagFunction
         this.generatedEqualiser = generatedEqualiser;
         this.generatedSortKeyComparator = generatedSortKeyComparator;
         this.lagFieldGetters = new ArrayList<RowData.FieldGetter>();
+        this.isStreamMode = !isBatchBackfillEnabled;
         for (Integer lagFieldIdx : inputFieldIdxs) {
             this.lagFieldGetters.add(
                 RowData.createFieldGetter(
@@ -112,6 +119,64 @@ public class RetractableLagFunction
     }
 
     @Override
+    public boolean isHybridStreamBatchCapable() {
+        return true;
+    }
+
+    public boolean isBatchMode() {
+        return !this.isStreamMode;
+    }
+
+    private String getPrintableName() {
+        return getRuntimeContext().getJobId() + " " + getRuntimeContext().getTaskName();
+    }
+
+    public void emitStateAndSwitchToStreaming(Context ctx, Collector<RowData> out,
+                    KeyedStateBackend<RowData> be) throws Exception {
+        if (isStreamMode) {
+            LOG.warn("Programming error in {} -- asked to switch to streaming while not in batch mode",
+                        getPrintableName());
+            return;
+        }
+
+        LOG.info("{} transitioning from Batch to Stream mode", getPrintableName());
+
+        ListTypeInfo<RowData> valueTypeInfo = new ListTypeInfo<>(inputRowType);
+        ValueStateDescriptor<SortedMap<RowData, List<RowData>>> valueStateDescriptor = new ValueStateDescriptor<>(
+                "data-state",
+                new SortedMapTypeInfo<>(
+                        sortKeyType, valueTypeInfo, serializableComparator));
+
+        be.applyToAllKeys(VoidNamespace.INSTANCE,
+                VoidNamespaceSerializer.INSTANCE,
+                valueStateDescriptor,
+                new KeyedStateFunction<RowData, ValueState<SortedMap<RowData, List<RowData>>>>() {
+                    @Override
+                    public void process(RowData partitionKey, ValueState<SortedMap<RowData, List<RowData>>> state)
+                            throws Exception {
+                        // The access to dataState.get() below requires a current key
+                        // set for partioned stream operators.
+                        be.setCurrentKey(partitionKey);
+
+                        // Walk all of the rows in order, maintaining the preceding row
+                        // for LAG calculation, and emit everything as an insert
+                        SortedMap<RowData, List<RowData>> sortedMap = dataState.value();
+                        RowData precedingRecord = null;
+                        for (List<RowData> records : sortedMap.values()) {
+                            for (RowData row : records) {
+                                out.collect(buildOutputRow(row, precedingRecord, RowKind.INSERT));
+                                precedingRecord = row;
+                            }
+                        }
+                     }
+                });
+
+        LOG.info("{} transitioned to Stream mode", getPrintableName());
+
+        isStreamMode = true;
+    }
+
+    @Override
     public void processElement(RowData input, Context ctx, Collector<RowData> out)
             throws Exception {
 
@@ -139,7 +204,19 @@ public class RetractableLagFunction
         RowData precedingRecord = null;
         RowData followingRecord = null;
 
-        if (isAccumulate) {
+        if (isBatchMode()) {
+            // In batch mode, all we do is save a sorted result set,
+            // which we iterate in emit code
+            if (isAccumulate) {
+                records.add(input);
+            } else {
+                records.remove(input);
+                if (records.isEmpty()) {
+                    // remove empty list for this SortKey
+                    sortedMap.remove(sortKey);
+                }
+            }
+        } else if (isAccumulate) {
             if (!records.isEmpty()) {
                 // current sort key has existing entries, grab the last one
                 precedingRecord = records.get(records.size() - 1);

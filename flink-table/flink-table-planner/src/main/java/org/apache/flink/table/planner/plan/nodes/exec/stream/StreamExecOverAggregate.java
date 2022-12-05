@@ -393,6 +393,8 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
         LOG.debug("SERGEI aggCalls {}", aggCalls);
         LOG.debug("SERGEI contants {}", constants);
 
+        final boolean isBatchBackfillEnabled = config.get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL);
+
         List<Integer> inputFieldIdxs = new ArrayList<Integer>();
 
         // XXX(sergei): our implementation does not support custom offsets yet
@@ -458,7 +460,8 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
                         inputFieldIdxs,
                         sortKeySelector,
                         sortKeyComparator,
-                        generatedEqualiser);
+                        generatedEqualiser,
+                        isBatchBackfillEnabled);
     }
 
     /**
