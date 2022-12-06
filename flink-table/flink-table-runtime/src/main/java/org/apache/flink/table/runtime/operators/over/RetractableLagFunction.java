@@ -34,6 +34,7 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
@@ -179,6 +180,7 @@ public class RetractableLagFunction
     @Override
     public void processElement(RowData input, Context ctx, Collector<RowData> out)
             throws Exception {
+        LOG.debug("SERGEI INPUT {}", inputRowSerializer.asString(input));
 
         SortedMap<RowData, List<RowData>> sortedMap = dataState.value();
         if (sortedMap == null) {
@@ -199,7 +201,6 @@ public class RetractableLagFunction
             sortedMap.put(sortKey, records);
         }
 
-        LOG.debug("SERGEI INPUT {}", inputRowSerializer.asString(input));
 
         RowData precedingRecord = null;
         RowData followingRecord = null;
@@ -232,20 +233,10 @@ public class RetractableLagFunction
                 }
             }
 
-            // tailMap(K fromKey)
-            // Returns a view of the portion of this map whose keys are greater than or equal to fromKey.
-            SortedMap<RowData, List<RowData>> nextMap = sortedMap.tailMap(sortKey);
-            if (!nextMap.isEmpty()) {
-                for (final List<RowData> recs : nextMap.values()) {
-                    if (recs.isEmpty()) {
-                        continue;
-                    }
-                    followingRecord = recs.get(0);
-                    break;
-                }
-            }
+            followingRecord = findFollowingRecord(sortedMap, input, sortKey);
 
             records.add(input);
+
 
             if (followingRecord != null) {
                 // issue a retraction for the old following record and update it
@@ -301,19 +292,7 @@ public class RetractableLagFunction
             }
 
             if (followingRecord == null) {
-                // tailMap(K fromKey)
-                // Returns a view of the portion of this map whose keys are greater than or equal to fromKey.
-                SortedMap<RowData, List<RowData>> nextMap = sortedMap.tailMap(sortKey);
-                if (!nextMap.isEmpty()) {
-                    for (final List<RowData> recs : nextMap.values()) {
-                        if (recs.isEmpty()) {
-                            throw new Exception("RetactableLagFunction: must not have empty list in state: "
-                                                + inputRowSerializer.asString(input));
-                        }
-                        followingRecord = recs.get(0);
-                        break;
-                    }
-                }
+                followingRecord = findFollowingRecord(sortedMap, input, sortKey);
             }
 
             out.collect(buildOutputRow(input, precedingRecord, RowKind.DELETE));
@@ -325,6 +304,31 @@ public class RetractableLagFunction
         }
 
         dataState.update(sortedMap);
+    }
+
+    private RowData findFollowingRecord(SortedMap<RowData, List<RowData>> sortedMap,
+                RowData input,
+                RowData sortKey) throws Exception {
+        SortedMap<RowData, List<RowData>> nextMap = sortedMap.tailMap(sortKey);
+        if (!nextMap.isEmpty()) {
+            for (final Map.Entry<RowData, List<RowData>> entry : nextMap.entrySet()) {
+                RowData currKey = entry.getKey();
+                if (sortKeyComparator.compare(currKey, sortKey) == 0) {
+                    // range is closed, find the next key that's greater than
+                    // the current key
+                    continue;
+                }
+
+                List<RowData> recs = entry.getValue();
+                if (recs.isEmpty()) {
+                    throw new Exception("RetactableLagFunction: must not have empty list in state: "
+                                        + inputRowSerializer.asString(input));
+                }
+
+                return recs.get(0);
+            }
+        }
+        return null;
     }
 
     private RowData buildOutputRow(RowData inputRow, RowData lagRow, RowKind kind) {
