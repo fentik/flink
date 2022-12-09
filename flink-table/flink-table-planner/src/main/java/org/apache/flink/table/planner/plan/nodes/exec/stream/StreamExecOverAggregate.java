@@ -296,7 +296,7 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
                 ExecNodeConfig config,
                 List<AggregateCall> aggCalls,
                 List<RexLiteral> constants,
-                SortSpec sortSpec,
+                SortSpec origSortSpec,
                 RowType inputRowType,
                 RowType aggInputRowType,
                 InternalTypeInfo<RowData> inputRowTypeInfo,
@@ -348,7 +348,44 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
         GeneratedRecordEqualiser generatedEqualiser =
                 equaliserCodeGen.generateRecordEqualiser("OverAggregateEqualiser");
 
+        // XXX(sergei): the data structure used by the OverAggregate operator handles
+        // records with the same key (TreeMultiset), but when two records compare as
+        // equal, it increments a counter and stores the first record only. If we create
+        // a comparator for a subset of the keys, then we will end up ignoring rows which
+        // sort the same but are unique rows.
+        //
+        // So here, we are going to generate a comparator that always puts the sort key
+        // columns first, but does include the rest of the fields so that we do not
+        // clobber unique records.
+        //
+        // ------- BEGIN sortSpec modification
+
+        SortSpec.SortSpecBuilder ssBuilder = new SortSpec.SortSpecBuilder();
+        int[] sortFieldsOnly = origSortSpec.getFieldIndices();
+
+        int cursor = 0;
+        while (cursor < sortFieldsOnly.length) {
+            ssBuilder.addField(
+                sortFieldsOnly[cursor],
+                origSortSpec.getFieldSpec(cursor).getIsAscendingOrder(),
+                origSortSpec.getFieldSpec(cursor).getNullIsLast());
+            cursor++;
+        }
+
+        for (int idx = 0; idx < inputRowType.getFieldCount(); idx++) {
+            if (Arrays.binarySearch(sortFieldsOnly, idx) < 0) {
+                ssBuilder.addField(idx, true, true);
+                cursor++;
+            }
+        }
+
+        SortSpec sortSpec = ssBuilder.build();
+
+        // ------- END sortSpec modification
+
+
         int[] sortFields = sortSpec.getFieldIndices();
+
         int[] sortKeyPositions = IntStream.range(0, sortFields.length).toArray();
         SortSpec.SortSpecBuilder builder = SortSpec.builder();
         IntStream.range(0, sortFields.length)
