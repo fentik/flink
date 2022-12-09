@@ -160,7 +160,7 @@ public class OverAggregateFunction
                         for (SortedMultiset.Entry<RowData> entry : records.entrySet()) {
                             RowData record = entry.getElement();
                             function.accumulate(record);
-                            outputRow.setRowKind(RowKind.DELETE);
+                            outputRow.setRowKind(RowKind.INSERT);
                             outputRow.replace(record, function.getValue());
                             out.collect(outputRow);
                         }
@@ -187,6 +187,7 @@ public class OverAggregateFunction
         RowKind inputKind = input.getRowKind();
         input.setRowKind(RowKind.INSERT); // clobber for comparisons
 
+        RowData acc = null;
 
         // XXX(sergei): an inefficient implementation that's going after correctness
         // first; once we have that, we'll optimize for performance a bit
@@ -196,41 +197,38 @@ public class OverAggregateFunction
         //  - add/remove the new row
         //  - emit inserts for all rows in the current partition
 
-        RowData acc = function.createAccumulators();
-        function.setAccumulators(acc);
+        if (isStreamMode) {
+            acc = function.createAccumulators();
+            function.setAccumulators(acc);
 
-        for (SortedMultiset.Entry<RowData> entry : records.entrySet()) {
-            RowData record = entry.getElement();
-            function.accumulate(record);
-            outputRow.setRowKind(RowKind.DELETE);
-            outputRow.replace(record, function.getValue());
-            out.collect(outputRow);
+            for (SortedMultiset.Entry<RowData> entry : records.entrySet()) {
+                RowData record = entry.getElement();
+                function.accumulate(record);
+                outputRow.setRowKind(RowKind.DELETE);
+                outputRow.replace(record, function.getValue());
+                out.collect(outputRow);
+            }
         }
 
         if (isAccumulate) {
             records.add(input);
         } else {
             if (!records.remove(input)) {
-                LOG.warn("row not found in state: {}", input);
+                LOG.warn("row not found in state: {}", inputRowSerializer.asString(input));
             }
         }
 
-        function.resetAccumulators();
-        for (SortedMultiset.Entry<RowData> entry : records.entrySet()) {
-            RowData record = entry.getElement();
-            function.accumulate(record);
-            outputRow.setRowKind(RowKind.INSERT);
-            outputRow.replace(record, function.getValue());
-            out.collect(outputRow);
-        }
-
         state.update(records);
-    }
 
-    private void collectIfNotBatch(Collector<RowData> out, RowData output) {
-        /* Supress emitting row if we're in batch mode */
         if (isStreamMode) {
-            out.collect(output);
+            function.resetAccumulators();
+            for (SortedMultiset.Entry<RowData> entry : records.entrySet()) {
+                RowData record = entry.getElement();
+                function.accumulate(record);
+                outputRow.setRowKind(RowKind.INSERT);
+                outputRow.replace(record, function.getValue());
+                out.collect(outputRow);
+            }
         }
     }
 }
