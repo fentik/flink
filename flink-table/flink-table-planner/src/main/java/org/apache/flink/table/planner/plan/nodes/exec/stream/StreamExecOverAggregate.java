@@ -177,6 +177,11 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
 
 
         if (useGenericOverAggregate) {
+
+            if (group.getSort().getFieldSize() == 0) {
+                throw new TableException("OVER windows without an ORDER BY are not supported yet in this context");
+            }
+
             overProcessFunction = createGenericOverAggregateFunction(
                                     ctx,
                                     config,
