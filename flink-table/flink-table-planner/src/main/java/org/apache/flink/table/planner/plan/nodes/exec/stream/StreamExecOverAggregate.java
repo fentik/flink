@@ -366,6 +366,9 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
                         RowType.of(sortSpec.getFieldTypes(inputRowType)),
                         sortSpecInSortKey);
 
+        RowDataKeySelector sortKeySelector =
+            KeySelectorUtil.getRowDataSelector(sortFields, inputRowTypeInfo);
+
         ComparableRecordComparator generatedComparator =
                 new ComparableRecordComparator(
                         sortKeyComparator,
@@ -380,6 +383,7 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
                 flattenAccTypes,
                 generatedEqualiser,
                 generatedComparator,
+                sortKeySelector,
                 isBatchBackfillEnabled);
     }
 

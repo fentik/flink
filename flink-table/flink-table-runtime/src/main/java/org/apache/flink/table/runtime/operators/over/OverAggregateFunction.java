@@ -46,11 +46,14 @@ import org.apache.flink.table.runtime.util.RowDataStringSerializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.SortedMap;
 import java.util.TreeMap;
+import java.util.Iterator;
+
 
 public class OverAggregateFunction 
     extends KeyedProcessFunction<RowData, RowData, RowData>  {
@@ -70,8 +73,10 @@ public class OverAggregateFunction
     private transient AggsHandleFunction function = null;
     private PerKeyStateDataViewStore dataViewStore = null;
     private GeneratedAggsHandleFunction genAggsHandler;
-    private final ComparableRecordComparator recordComparator;
+    private final ComparableRecordComparator sortKeyComparator;
+    private final Comparator<RowData> recordComparator;
     private final RecordCounter recordCounter;
+    private final RowDataKeySelector sortKeySelector;
 
     private JoinedRowData outputRow;
 
@@ -85,21 +90,48 @@ public class OverAggregateFunction
             GeneratedAggsHandleFunction genAggsHandler,
             LogicalType[] accTypes,
             GeneratedRecordEqualiser generatedEqualiser,
-            ComparableRecordComparator recordComparator,
+            ComparableRecordComparator sortKeyComparator,
+            RowDataKeySelector sortKeySelector,
             boolean isBatchBackfillEnabled
         ) {
-        SortedMultisetTypeInfo<RowData> smTypeInfo = new SortedMultisetTypeInfo<RowData>(inputRowType, recordComparator);
         this.inputRowType = inputRowType;
         this.accTypes = accTypes;
         this.genAggsHandler = genAggsHandler;
-        this.recordComparator = recordComparator;
+        this.sortKeyComparator = sortKeyComparator;
+        this.sortKeySelector = sortKeySelector;
+        this.recordComparator = new KeyedRecordComparator(sortKeySelector, sortKeyComparator);
         this.generatedEqualiser = generatedEqualiser;
         this.recordCounter = RecordCounter.of(indexOfCountStar);
         this.inputRowSerializer = new RowDataStringSerializer(this.inputRowType);
         this.isStreamMode = !isBatchBackfillEnabled;
+
+        SortedMultisetTypeInfo<RowData> smTypeInfo = new SortedMultisetTypeInfo<RowData>(inputRowType, recordComparator);
         this.stateDesc = new ValueStateDescriptor<SortedMultiset<RowData>>("state", smTypeInfo);
     }
-            
+
+    class KeyedRecordComparator implements Comparator<RowData>, Serializable {
+        private final RowDataKeySelector sortKeySelector;
+        private final ComparableRecordComparator sortKeyComparator;
+
+        public KeyedRecordComparator(
+                RowDataKeySelector sortKeySelector,
+                ComparableRecordComparator sortKeyComparator) {
+            this.sortKeyComparator = sortKeyComparator;
+            this.sortKeySelector = sortKeySelector;
+        }
+
+        @Override
+        public int compare(RowData r1, RowData r2) {
+            try {
+                RowData k1 = sortKeySelector.getKey(r1);
+                RowData k2 = sortKeySelector.getKey(r2);
+                return sortKeyComparator.compare(k1, k2);
+            } catch (Exception e) {
+                LOG.error("Unexpected exception {}", e);
+                return 0;
+            }
+        }
+    }
 
     @Override
     public void open(Configuration parameters) throws Exception {
@@ -157,8 +189,8 @@ public class OverAggregateFunction
                         RowData acc = function.createAccumulators();
                         function.setAccumulators(acc);
 
-                        for (SortedMultiset.Entry<RowData> entry : records.entrySet()) {
-                            RowData record = entry.getElement();
+                        for (Iterator<RowData> i = records.iterator(); i.hasNext(); ) {
+                            RowData record = i.next();
                             function.accumulate(record);
                             outputRow.setRowKind(RowKind.INSERT);
                             outputRow.replace(record, function.getValue());
@@ -201,8 +233,8 @@ public class OverAggregateFunction
             acc = function.createAccumulators();
             function.setAccumulators(acc);
 
-            for (SortedMultiset.Entry<RowData> entry : records.entrySet()) {
-                RowData record = entry.getElement();
+            for (Iterator<RowData> i = records.iterator(); i.hasNext(); ) {
+                RowData record = i.next();
                 function.accumulate(record);
                 outputRow.setRowKind(RowKind.DELETE);
                 outputRow.replace(record, function.getValue());
@@ -222,8 +254,8 @@ public class OverAggregateFunction
 
         if (isStreamMode) {
             function.resetAccumulators();
-            for (SortedMultiset.Entry<RowData> entry : records.entrySet()) {
-                RowData record = entry.getElement();
+            for (Iterator<RowData> i = records.iterator(); i.hasNext(); ) {
+                RowData record = i.next();
                 function.accumulate(record);
                 outputRow.setRowKind(RowKind.INSERT);
                 outputRow.replace(record, function.getValue());
