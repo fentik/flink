@@ -66,7 +66,6 @@ import org.apache.flink.table.runtime.types.LogicalTypeDataTypeConverter;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.runtime.operators.over.RetractableLagFunction;
 import org.apache.flink.table.runtime.operators.over.OverAggregateFunction;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -177,32 +176,7 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
         final CodeGeneratorContext ctx = new CodeGeneratorContext(config.getTableConfig());
 
 
-        // XXX(sergei): the way I detect a LAG function here is really Janky, but that's
-        // OK for now. The code will create a process function that looks very similar
-        // to the RetractableTopNFunction implementation for the RANK operator. There's
-        // a lot of similarity to codepath here.
-        int numLagAggs = 0;
-        for (AggregateCall agg : group.getAggCalls()) {
-            if (agg.getAggregation().getName() == "LAG") {
-                numLagAggs++;
-            }
-        }
-        if (numLagAggs > 0) {
-            // XXX(sergei): need to merge the two implementation, but for now keep things
-            // simpler and create two separate code paths
-            if (numLagAggs != group.getAggCalls().size()) {
-                throw new TableException("Mixing LAG and non-LAG aggregate functions is not supported yet.");
-            }
-            overProcessFunction = createRetractableLagFunction(
-                                    ctx,
-                                    config,
-                                    group.getAggCalls(),
-                                    constants,
-                                    group.getSort(),
-                                    inputRowType,
-                                    aggInputRowType,
-                                    inputRowTypeInfo);
-        } else if (useGenericOverAggregate) {
+        if (useGenericOverAggregate) {
             overProcessFunction = createGenericOverAggregateFunction(
                                     ctx,
                                     config,
@@ -326,7 +300,7 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
         final boolean isBatchBackfillEnabled = config.get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL);
 
         boolean[] aggCallNeedRetractions = new boolean[aggCalls.size()];
-        Arrays.fill(aggCallNeedRetractions, true);
+        Arrays.fill(aggCallNeedRetractions, false);
 
         AggregateInfoList aggInfoList =
                 AggregateUtil.transformToStreamAggregateInfoList(
@@ -335,7 +309,7 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
                         aggInputRowType,
                         JavaScalaConversionUtil.toScala(aggCalls),
                         aggCallNeedRetractions,
-                        true, // needRetraction
+                        false, // needRetraction
                         true, // isStateBackendDataViews
                         true); // needDistinctInfo
 
@@ -350,7 +324,7 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
         GeneratedAggsHandleFunction genAggsHandler =
                 generator
                         .needAccumulate()
-                        .needRetract()
+                        // .needRetract()
                         // over agg code gen must pass the constants
                         .withConstants(JavaScalaConversionUtil.toScala(constants))
                         .generateAggsHandler("GenericOverAggregateHelper", aggInfoList);
@@ -402,93 +376,6 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
                 generatedEqualiser,
                 generatedComparator,
                 isBatchBackfillEnabled);
-    }
-
-    private KeyedProcessFunction<RowData, RowData, RowData> createRetractableLagFunction(
-                CodeGeneratorContext ctx,
-                ExecNodeConfig config,
-                List<AggregateCall> aggCalls,
-                List<RexLiteral> constants,
-                SortSpec sortSpec,
-                RowType inputRowType,
-                RowType aggInputRowType,
-                InternalTypeInfo<RowData> inputRowTypeInfo) {
-        LOG.debug("SERGEI create retractable lag function");
-
-        LOG.debug("SERGEI inputRowType {}", inputRowType);
-        LOG.debug("SERGEI aggInputRowType {}", aggInputRowType);
-        LOG.debug("SERGEI aggCalls {}", aggCalls);
-        LOG.debug("SERGEI contants {}", constants);
-
-        final boolean isBatchBackfillEnabled = config.get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL);
-
-        List<Integer> inputFieldIdxs = new ArrayList<Integer>();
-
-        // XXX(sergei): our implementation does not support custom offsets yet
-        for (AggregateCall aggCall : aggCalls) {
-            if (aggCall.getArgList().size() != 1) {
-                throw new TableException("LAG(expression) is currently the only supported syntax (offset=1 and default NULL).");
-            }
-
-            if (constants.size() > 0) {
-                throw new TableException("LAG() does not currently accept constant arguments.");
-            }
-
-            // XXX(sergei): first argument is the index into the input row
-            inputFieldIdxs.add(Integer.valueOf(aggCall.getArgList().get(0)));
-        }
-
-        // XXX(sergei): hardcode lag offset to 1 until above is resolved
-        final int lagOffset = 1;
-
-        LogicalType[] fieldTypes = inputRowType.getChildren().toArray(new LogicalType[0]);
-
-        int[] sortFields = sortSpec.getFieldIndices();
-        RowDataKeySelector sortKeySelector =
-                KeySelectorUtil.getRowDataSelector(sortFields, inputRowTypeInfo);
-        // create a sort spec on sort keys.
-        int[] sortKeyPositions = IntStream.range(0, sortFields.length).toArray();
-        SortSpec.SortSpecBuilder builder = SortSpec.builder();
-        IntStream.range(0, sortFields.length)
-                .forEach(
-                        idx ->
-                                builder.addField(
-                                        idx,
-                                        sortSpec.getFieldSpec(idx).getIsAscendingOrder(),
-                                        sortSpec.getFieldSpec(idx).getNullIsLast()));
-        SortSpec sortSpecInSortKey = builder.build();
-        GeneratedRecordComparator sortKeyComparator =
-                ComparatorCodeGenerator.gen(
-                        config.getTableConfig(),
-                        "StreamExecOverAggregateOrderByComparator",
-                        RowType.of(sortSpec.getFieldTypes(inputRowType)),
-                        sortSpecInSortKey);
-
-        EqualiserCodeGenerator equaliserCodeGen =
-                new EqualiserCodeGenerator(
-                         inputRowType.getFields().stream()
-                                 .map(RowType.RowField::getType)
-                                 .toArray(LogicalType[]::new));
-
-        GeneratedRecordEqualiser generatedEqualiser =
-                equaliserCodeGen.generateRecordEqualiser("LagValueEqualiser");
-
-        ComparableRecordComparator comparator =
-                new ComparableRecordComparator(
-                        sortKeyComparator,
-                        sortKeyPositions,
-                        sortSpec.getFieldTypes(inputRowType),
-                        sortSpec.getAscendingOrders(),
-                        sortSpec.getNullsIsLast());
-
-        return new RetractableLagFunction(
-                        inputRowTypeInfo,
-                        comparator,
-                        inputFieldIdxs,
-                        sortKeySelector,
-                        sortKeyComparator,
-                        generatedEqualiser,
-                        isBatchBackfillEnabled);
     }
 
     /**
