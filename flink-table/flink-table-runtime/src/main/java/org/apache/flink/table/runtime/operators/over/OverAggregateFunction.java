@@ -11,6 +11,9 @@ import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.state.VoidNamespace;
 import org.apache.flink.runtime.state.VoidNamespaceSerializer;
+import org.apache.flink.shaded.guava30.com.google.common.collect.SortedMultiset;
+import org.apache.flink.shaded.guava30.com.google.common.collect.TreeMultiset;
+import org.apache.flink.shaded.guava30.com.google.common.collect.BoundType;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.utils.JoinedRowData;
 import org.apache.flink.table.data.util.RowDataUtil;
@@ -23,7 +26,9 @@ import org.apache.flink.table.runtime.generated.RecordEqualiser;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.table.runtime.keyselector.RowDataKeySelector;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
+import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.runtime.typeutils.SortedMapTypeInfo;
+import org.apache.flink.table.runtime.typeutils.SortedMultisetTypeInfo;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Collector;
@@ -50,7 +55,7 @@ import java.util.TreeMap;
 public class OverAggregateFunction 
     extends KeyedProcessFunction<RowData, RowData, RowData>  {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
     private static final Logger LOG = LoggerFactory.getLogger(OverAggregateFunction.class);
 
     private RecordEqualiser equaliser;
@@ -58,12 +63,14 @@ public class OverAggregateFunction
     private final InternalTypeInfo<RowData> inputRowType;
     private final RowDataStringSerializer inputRowSerializer;
 
-    private transient ValueState<RowData> accState;
-    private transient ListState<RowData> listState;
+    private ValueStateDescriptor<SortedMultiset<RowData>> stateDesc;
+    private transient ValueState<SortedMultiset<RowData>> state;
+
     private final LogicalType[] accTypes;
     private transient AggsHandleFunction function = null;
     private PerKeyStateDataViewStore dataViewStore = null;
     private GeneratedAggsHandleFunction genAggsHandler;
+    private final ComparableRecordComparator recordComparator;
     private final RecordCounter recordCounter;
 
     private JoinedRowData outputRow;
@@ -78,15 +85,19 @@ public class OverAggregateFunction
             GeneratedAggsHandleFunction genAggsHandler,
             LogicalType[] accTypes,
             GeneratedRecordEqualiser generatedEqualiser,
+            ComparableRecordComparator recordComparator,
             boolean isBatchBackfillEnabled
         ) {
+        SortedMultisetTypeInfo<RowData> smTypeInfo = new SortedMultisetTypeInfo<RowData>(inputRowType, recordComparator);
         this.inputRowType = inputRowType;
         this.accTypes = accTypes;
         this.genAggsHandler = genAggsHandler;
+        this.recordComparator = recordComparator;
         this.generatedEqualiser = generatedEqualiser;
         this.recordCounter = RecordCounter.of(indexOfCountStar);
         this.inputRowSerializer = new RowDataStringSerializer(this.inputRowType);
         this.isStreamMode = !isBatchBackfillEnabled;
+        this.stateDesc = new ValueStateDescriptor<SortedMultiset<RowData>>("state", smTypeInfo);
     }
             
 
@@ -94,17 +105,11 @@ public class OverAggregateFunction
     public void open(Configuration parameters) throws Exception {
         super.open(parameters);
 
-        InternalTypeInfo<RowData> accTypeInfo = InternalTypeInfo.ofFields(accTypes);
-        ValueStateDescriptor<RowData> accDesc = new ValueStateDescriptor<>("accState", accTypeInfo);
-        accState = getRuntimeContext().getState(accDesc);
-
         dataViewStore = new PerKeyStateDataViewStore(getRuntimeContext());
         function = genAggsHandler.newInstance(getRuntimeContext().getUserCodeClassLoader());
         function.open(dataViewStore);
 
-        ListStateDescriptor<RowData> listStateDesc =
-            new ListStateDescriptor<RowData>("listState", inputRowType);
-        listState = getRuntimeContext().getListState(listStateDesc);
+        state = getRuntimeContext().getState(stateDesc);
 
         // compile equaliser
         equaliser = generatedEqualiser.newInstance(getRuntimeContext().getUserCodeClassLoader());
@@ -126,6 +131,7 @@ public class OverAggregateFunction
         return getRuntimeContext().getJobId() + " " + getRuntimeContext().getTaskName();
     }
 
+    @Override
     public void emitStateAndSwitchToStreaming(Context ctx, Collector<RowData> out,
                     KeyedStateBackend<RowData> be) throws Exception {
         if (isStreamMode) {
@@ -136,25 +142,26 @@ public class OverAggregateFunction
 
         LOG.info("{} transitioning from Batch to Stream mode", getPrintableName());
 
-        ListStateDescriptor<RowData> listStateDesc =
-            new ListStateDescriptor<RowData>("listState", inputRowType);
-
         be.applyToAllKeys(VoidNamespace.INSTANCE,
                 VoidNamespaceSerializer.INSTANCE,
-                listStateDesc,
-                new KeyedStateFunction<RowData, ListState<RowData>>() {
+                stateDesc,
+                new KeyedStateFunction<RowData, ValueState<SortedMultiset<RowData>>>() {
                     @Override
-                    public void process(RowData key, ListState<RowData> listState) throws Exception {
+                    public void process(RowData key, ValueState<SortedMultiset<RowData>> state) throws Exception {
                         // The access to dataState.get() below requires a current key
                         // set for partioned stream operators.
                         be.setCurrentKey(key);
 
-                        RowData accumulators = accState.value();
-                        function.setAccumulators(accumulators);
-                        RowData aggValue = function.getValue();
+                        SortedMultiset<RowData> records = state.value();
 
-                        for (RowData row : listState.get()) {
-                            outputRow.replace(row, aggValue).setRowKind(RowKind.INSERT);
+                        RowData acc = function.createAccumulators();
+                        function.setAccumulators(acc);
+
+                        for (SortedMultiset.Entry<RowData> entry : records.entrySet()) {
+                            RowData record = entry.getElement();
+                            function.accumulate(record);
+                            outputRow.setRowKind(RowKind.DELETE);
+                            outputRow.replace(record, function.getValue());
                             out.collect(outputRow);
                         }
                     }
@@ -169,93 +176,55 @@ public class OverAggregateFunction
     @Override
     public void processElement(RowData input, Context ctx, Collector<RowData> out)
             throws Exception {
+        SortedMultiset<RowData> records = state.value();
+        LOG.debug("SERGEI input {}", inputRowSerializer.asString(input));
 
-        boolean firstRow;
-        RowData accumulators = accState.value();
-        if (null == accumulators) {
-            // Don't create a new accumulator for a retraction message. This
-            // might happen if the retraction message is the first message for the
-            // key or after a state clean up.
-            if (isRetractMsg(input)) {
-                return;
-            }
-            firstRow = true;
-            accumulators = function.createAccumulators();
-        } else {
-            firstRow = false;
-        }
-        
-        // set accumulators to handler first
-        function.setAccumulators(accumulators);
-        // get previous aggregate result
-        RowData prevAggValue = function.getValue();
-       
-        // update aggregate result and set to the newRow
-        if (isAccumulateMsg(input)) {
-            // accumulate input
-            function.accumulate(input);
-        } else {
-            // retract input
-            function.retract(input);
-        }
-        // get current aggregate result
-        RowData newAggValue = function.getValue();
-        
-        // get accumulator
-        accumulators = function.getAccumulators();
-        
-        if (!recordCounter.recordCountIsZero(accumulators)) {
-            // we aggregated at least one record for this key
-            // update the state
-            accState.update(accumulators);
-
-            // if this was not the first row and we have to emit retractions
-            if (!firstRow) {
-                for (RowData row : listState.get()) {
-                    outputRow
-                        .replace(row, prevAggValue)
-                        .setRowKind(RowKind.UPDATE_BEFORE);
-                    collectIfNotBatch(out, outputRow);
-                    outputRow.replace(row, newAggValue).setRowKind(RowKind.UPDATE_AFTER);
-                    collectIfNotBatch(out, outputRow);
-                }
-            } else {
-                // this is the first, output new result
-                // prepare INSERT message for new row
-                outputRow.replace(input, newAggValue).setRowKind(RowKind.INSERT);
-                collectIfNotBatch(out, outputRow);
-            }
-        } else {
-            // we retracted the last record for this key
-            // sent out a delete message
-            if (!firstRow) {
-                // prepare delete message for previous row
-                outputRow.replace(input, prevAggValue).setRowKind(RowKind.DELETE);
-                collectIfNotBatch(out, outputRow);
-            }
-            // and clear all state
-            accState.clear();
-            // cleanup dataview under current key
-            function.cleanup();
+        if (records == null) {
+            records = TreeMultiset.create(recordComparator);
         }
 
-        // clobber row kind for comparisons
-        input.setRowKind(RowKind.INSERT);
+        boolean isAccumulate = isAccumulateMsg(input);
+        RowKind inputKind = input.getRowKind();
+        input.setRowKind(RowKind.INSERT); // clobber for comparisons
 
-        if (isAccumulateMsg(input)) {
-            outputRow.replace(input, newAggValue).setRowKind(RowKind.INSERT);
-            collectIfNotBatch(out, outputRow);
-            listState.add(input);
-        } else {
-            // we have already issued a retraction for this row in the loop above
-            List<RowData> newState = new ArrayList<RowData>();
-            for (RowData row : listState.get()) {
-                if (!equaliser.equals(row, input)) {
-                    newState.add(row);
-                }
-            }
-            listState.update(newState);
+
+        // XXX(sergei): an inefficient implementation that's going after correctness
+        // first; once we have that, we'll optimize for performance a bit
+        //
+        // The inefficient implementation looks as follows:
+        //  - emit retraction for all rows in the current partition
+        //  - add/remove the new row
+        //  - emit inserts for all rows in the current partition
+
+        RowData acc = function.createAccumulators();
+        function.setAccumulators(acc);
+
+        for (SortedMultiset.Entry<RowData> entry : records.entrySet()) {
+            RowData record = entry.getElement();
+            function.accumulate(record);
+            outputRow.setRowKind(RowKind.DELETE);
+            outputRow.replace(record, function.getValue());
+            out.collect(outputRow);
         }
+
+        if (isAccumulate) {
+            records.add(input);
+        } else {
+            if (!records.remove(input)) {
+                LOG.warn("row not found in state: {}", input);
+            }
+        }
+
+        function.resetAccumulators();
+        for (SortedMultiset.Entry<RowData> entry : records.entrySet()) {
+            RowData record = entry.getElement();
+            function.accumulate(record);
+            outputRow.setRowKind(RowKind.INSERT);
+            outputRow.replace(record, function.getValue());
+            out.collect(outputRow);
+        }
+
+        state.update(records);
     }
 
     private void collectIfNotBatch(Collector<RowData> out, RowData output) {

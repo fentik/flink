@@ -369,11 +369,38 @@ public class StreamExecOverAggregate extends ExecNodeBase<RowData>
         GeneratedRecordEqualiser generatedEqualiser =
                 equaliserCodeGen.generateRecordEqualiser("OverAggregateEqualiser");
 
+        int[] sortFields = sortSpec.getFieldIndices();
+        int[] sortKeyPositions = IntStream.range(0, sortFields.length).toArray();
+        SortSpec.SortSpecBuilder builder = SortSpec.builder();
+        IntStream.range(0, sortFields.length)
+                .forEach(
+                        idx ->
+                                builder.addField(
+                                        idx,
+                                        sortSpec.getFieldSpec(idx).getIsAscendingOrder(),
+                                        sortSpec.getFieldSpec(idx).getNullIsLast()));
+        SortSpec sortSpecInSortKey = builder.build();
+        GeneratedRecordComparator sortKeyComparator =
+                ComparatorCodeGenerator.gen(
+                        config.getTableConfig(),
+                        "StreamExecOverAggregateOrderByComparator",
+                        RowType.of(sortSpec.getFieldTypes(inputRowType)),
+                        sortSpecInSortKey);
+
+        ComparableRecordComparator generatedComparator =
+                new ComparableRecordComparator(
+                        sortKeyComparator,
+                        sortKeyPositions,
+                        sortSpec.getFieldTypes(inputRowType),
+                        sortSpec.getAscendingOrders(),
+                        sortSpec.getNullsIsLast());
+        
         return new OverAggregateFunction(
                 inputRowTypeInfo,
                 genAggsHandler,
                 flattenAccTypes,
                 generatedEqualiser,
+                generatedComparator,
                 isBatchBackfillEnabled);
     }
 
