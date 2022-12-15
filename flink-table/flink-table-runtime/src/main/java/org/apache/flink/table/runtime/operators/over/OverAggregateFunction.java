@@ -5,14 +5,13 @@ import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
+import org.apache.flink.api.common.state.MapStateDescriptor;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.typeutils.ListTypeInfo;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.state.VoidNamespace;
 import org.apache.flink.runtime.state.VoidNamespaceSerializer;
-import org.apache.flink.shaded.guava30.com.google.common.collect.SortedMultiset;
-import org.apache.flink.shaded.guava30.com.google.common.collect.TreeMultiset;
 import org.apache.flink.shaded.guava30.com.google.common.collect.BoundType;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.utils.JoinedRowData;
@@ -28,7 +27,6 @@ import org.apache.flink.table.runtime.keyselector.RowDataKeySelector;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.runtime.typeutils.SortedMapTypeInfo;
-import org.apache.flink.table.runtime.typeutils.SortedMultisetTypeInfo;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Collector;
@@ -66,17 +64,16 @@ public class OverAggregateFunction
     private final InternalTypeInfo<RowData> inputRowType;
     private final RowDataStringSerializer inputRowSerializer;
 
-    private ValueStateDescriptor<SortedMultiset<RowData>> stateDesc;
-    private transient ValueState<SortedMultiset<RowData>> state;
+    static private final String STATE_NAME = "state";
+    private transient ValueState<SortedMap<RowData, List<RowData>>> state;
 
-    private final LogicalType[] accTypes;
     private transient AggsHandleFunction function = null;
     private PerKeyStateDataViewStore dataViewStore = null;
     private GeneratedAggsHandleFunction genAggsHandler;
     private final ComparableRecordComparator sortKeyComparator;
-    private final Comparator<RowData> recordComparator;
-    private final RecordCounter recordCounter;
     private final RowDataKeySelector sortKeySelector;
+    private final InternalTypeInfo<RowData> sortKeyType;
+    private final RecordCounter recordCounter;
 
     private JoinedRowData outputRow;
 
@@ -88,49 +85,20 @@ public class OverAggregateFunction
     public OverAggregateFunction(
             InternalTypeInfo<RowData> inputRowType,
             GeneratedAggsHandleFunction genAggsHandler,
-            LogicalType[] accTypes,
             GeneratedRecordEqualiser generatedEqualiser,
             ComparableRecordComparator sortKeyComparator,
             RowDataKeySelector sortKeySelector,
             boolean isBatchBackfillEnabled
         ) {
         this.inputRowType = inputRowType;
-        this.accTypes = accTypes;
         this.genAggsHandler = genAggsHandler;
         this.sortKeyComparator = sortKeyComparator;
         this.sortKeySelector = sortKeySelector;
-        this.recordComparator = new KeyedRecordComparator(sortKeySelector, sortKeyComparator);
+        this.sortKeyType = sortKeySelector.getProducedType();
         this.generatedEqualiser = generatedEqualiser;
         this.recordCounter = RecordCounter.of(indexOfCountStar);
         this.inputRowSerializer = new RowDataStringSerializer(this.inputRowType);
         this.isStreamMode = !isBatchBackfillEnabled;
-
-        SortedMultisetTypeInfo<RowData> smTypeInfo = new SortedMultisetTypeInfo<RowData>(inputRowType, recordComparator);
-        this.stateDesc = new ValueStateDescriptor<SortedMultiset<RowData>>("state", smTypeInfo);
-    }
-
-    class KeyedRecordComparator implements Comparator<RowData>, Serializable {
-        private final RowDataKeySelector sortKeySelector;
-        private final ComparableRecordComparator sortKeyComparator;
-
-        public KeyedRecordComparator(
-                RowDataKeySelector sortKeySelector,
-                ComparableRecordComparator sortKeyComparator) {
-            this.sortKeyComparator = sortKeyComparator;
-            this.sortKeySelector = sortKeySelector;
-        }
-
-        @Override
-        public int compare(RowData r1, RowData r2) {
-            try {
-                RowData k1 = sortKeySelector.getKey(r1);
-                RowData k2 = sortKeySelector.getKey(r2);
-                return sortKeyComparator.compare(k1, k2);
-            } catch (Exception e) {
-                LOG.error("Unexpected exception {}", e);
-                return 0;
-            }
-        }
     }
 
     @Override
@@ -141,9 +109,17 @@ public class OverAggregateFunction
         function = genAggsHandler.newInstance(getRuntimeContext().getUserCodeClassLoader());
         function.open(dataViewStore);
 
-        state = getRuntimeContext().getState(stateDesc);
+        ListTypeInfo<RowData> valueTypeInfo = new ListTypeInfo<>(inputRowType);
+        ValueStateDescriptor<SortedMap<RowData, List<RowData>>> valueStateDescriptor =
+            new ValueStateDescriptor<>(
+                STATE_NAME,
+                new SortedMapTypeInfo<>(
+                        sortKeyType,
+                        valueTypeInfo,
+                        sortKeyComparator));
 
-        // compile equaliser
+        state = getRuntimeContext().getState(valueStateDescriptor);
+
         equaliser = generatedEqualiser.newInstance(getRuntimeContext().getUserCodeClassLoader());
         generatedEqualiser = null;
 
@@ -174,27 +150,37 @@ public class OverAggregateFunction
 
         LOG.info("{} transitioning from Batch to Stream mode", getPrintableName());
 
+        ListTypeInfo<RowData> valueTypeInfo = new ListTypeInfo<>(inputRowType);
+        ValueStateDescriptor<SortedMap<RowData, List<RowData>>> valueStateDescriptor =
+            new ValueStateDescriptor<>(
+                STATE_NAME,
+                new SortedMapTypeInfo<>(
+                        sortKeyType,
+                        valueTypeInfo,
+                        sortKeyComparator));
+
         be.applyToAllKeys(VoidNamespace.INSTANCE,
                 VoidNamespaceSerializer.INSTANCE,
-                stateDesc,
-                new KeyedStateFunction<RowData, ValueState<SortedMultiset<RowData>>>() {
+                valueStateDescriptor,
+                new KeyedStateFunction<RowData, ValueState<SortedMap<RowData, List<RowData>>>>() {
                     @Override
-                    public void process(RowData key, ValueState<SortedMultiset<RowData>> state) throws Exception {
+                    public void process(RowData key, ValueState<SortedMap<RowData, List<RowData>>> state) throws Exception {
                         // The access to dataState.get() below requires a current key
                         // set for partioned stream operators.
                         be.setCurrentKey(key);
 
-                        SortedMultiset<RowData> records = state.value();
+                        SortedMap<RowData, List<RowData>> treeMap = state.value();
 
                         RowData acc = function.createAccumulators();
                         function.setAccumulators(acc);
 
-                        for (Iterator<RowData> i = records.iterator(); i.hasNext(); ) {
-                            RowData record = i.next();
-                            function.accumulate(record);
-                            outputRow.setRowKind(RowKind.INSERT);
-                            outputRow.replace(record, function.getValue());
-                            out.collect(outputRow);
+                        for (List<RowData> records : treeMap.values()) {
+                            for (RowData record : records) {
+                                function.accumulate(record);
+                                outputRow.setRowKind(RowKind.INSERT);
+                                outputRow.replace(record, function.getValue());
+                                out.collect(outputRow);
+                            }
                         }
                     }
                 });
@@ -208,11 +194,21 @@ public class OverAggregateFunction
     @Override
     public void processElement(RowData input, Context ctx, Collector<RowData> out)
             throws Exception {
-        SortedMultiset<RowData> records = state.value();
         LOG.debug("SERGEI input {}", inputRowSerializer.asString(input));
 
+        SortedMap<RowData, List<RowData>> sortedMap = state.value();
+
+        if (sortedMap == null) {
+            sortedMap = new TreeMap<>(sortKeyComparator);
+        }
+    
+        RowData sortKey = sortKeySelector.getKey(input);
+
+        List<RowData> records = sortedMap.get(sortKey);
+
         if (records == null) {
-            records = TreeMultiset.create(recordComparator);
+            records = new ArrayList<>();
+            sortedMap.put(sortKey, records);
         }
 
         boolean isAccumulate = isAccumulateMsg(input);
@@ -233,12 +229,13 @@ public class OverAggregateFunction
             acc = function.createAccumulators();
             function.setAccumulators(acc);
 
-            for (Iterator<RowData> i = records.iterator(); i.hasNext(); ) {
-                RowData record = i.next();
-                function.accumulate(record);
-                outputRow.setRowKind(RowKind.DELETE);
-                outputRow.replace(record, function.getValue());
-                out.collect(outputRow);
+            for (List<RowData> recs : sortedMap.values()) {
+                for (RowData record : recs) {
+                    function.accumulate(record);
+                    outputRow.setRowKind(RowKind.DELETE);
+                    outputRow.replace(record, function.getValue());
+                    out.collect(outputRow);
+                }
             }
         }
 
@@ -248,18 +245,22 @@ public class OverAggregateFunction
             if (!records.remove(input)) {
                 LOG.warn("row not found in state: {}", inputRowSerializer.asString(input));
             }
+            if (records.isEmpty()) {
+                sortedMap.remove(sortKey);
+            }
         }
 
-        state.update(records);
+        state.update(sortedMap);
 
         if (isStreamMode) {
             function.resetAccumulators();
-            for (Iterator<RowData> i = records.iterator(); i.hasNext(); ) {
-                RowData record = i.next();
-                function.accumulate(record);
-                outputRow.setRowKind(RowKind.INSERT);
-                outputRow.replace(record, function.getValue());
-                out.collect(outputRow);
+            for (List<RowData> recs : sortedMap.values()) {
+                for (RowData record : recs) {
+                    function.accumulate(record);
+                    outputRow.setRowKind(RowKind.INSERT);
+                    outputRow.replace(record, function.getValue());
+                    out.collect(outputRow);
+                }
             }
         }
     }
