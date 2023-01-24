@@ -104,8 +104,8 @@
           "
         >
           {{
-            parseInt(node.detail.metrics['write-records']) /
-              parseInt(node.detail.metrics['read-records']) | number: '1.0-0'
+            node.detail.metrics['write-records'] / node.detail.metrics['read-records']
+              | number: '1.0-0'
           }}
         </span>
       </td>
