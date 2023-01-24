@@ -42,6 +42,9 @@ export class JobOverviewListComponent {
   public readonly sortReadRecordsFn = createSortFn(item => item.detail?.metrics?.['read-records']);
   public readonly sortWriteBytesFn = createSortFn(item => item.detail?.metrics?.['write-bytes']);
   public readonly sortWriteRecordsFn = createSortFn(item => item.detail?.metrics?.['write-records']);
+  public readonly sortFanoutFn = createSortFn(
+    item => item.detail?.metrics && item.detail?.metrics?.['write-records'] / item.detail?.metrics?.['read-records']
+  );
   public readonly sortParallelismFn = createSortFn(item => item.parallelism);
   public readonly sortStartTimeFn = createSortFn(item => item.detail?.['start-time']);
   public readonly sortDurationFn = createSortFn(item => item.detail?.duration);

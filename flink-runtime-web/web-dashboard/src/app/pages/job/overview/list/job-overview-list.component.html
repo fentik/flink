@@ -33,6 +33,7 @@
       <th [nzSortFn]="sortReadRecordsFn" nzWidth="150px">Records Received</th>
       <th [nzSortFn]="sortWriteBytesFn" nzWidth="150px">Bytes Sent</th>
       <th [nzSortFn]="sortWriteRecordsFn" nzWidth="120px">Records Sent</th>
+      <th [nzSortFn]="sortFanoutFn" nzWidth="120px">Fan Out</th>
       <th [nzSortFn]="sortParallelismFn" nzWidth="120px">Parallelism</th>
       <th [nzSortFn]="sortStartTimeFn" nzWidth="150px">Start Time</th>
       <th [nzSortFn]="sortDurationFn" nzWidth="150px">Duration</th>
@@ -93,6 +94,19 @@
           "
         >
           {{ node.detail.metrics['write-records'] | number: '1.0-0' }}
+        </span>
+      </td>
+      <td>
+        <span
+          *ngIf="
+            node.detail?.metrics && node.detail.metrics['write-records-complete'];
+            else loadingTemplate
+          "
+        >
+          {{
+            parseInt(node.detail.metrics['write-records']) /
+              parseInt(node.detail.metrics['read-records']) | number: '1.0-0'
+          }}
         </span>
       </td>
       <td>{{ node.parallelism }}</td>
