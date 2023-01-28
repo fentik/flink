@@ -173,27 +173,97 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
      * #getOuterRecords()}. See the method Javadoc for more details.
      */
     protected static final class AssociatedRecords {
+        private final static int EXPENSIVE_rowsFetched_THRESHOLD = 1000;
+        private final static int MAX_ASSOCIATED_ROWS_CACHE_SIZE = 10000;
+
         private final List<OuterRecord> records;
+        private final int numRecords;
+
+        private JoinCondition condition;
+        private JoinRecordStateView otherSideStateView;
+        private RowData input;
+        private boolean inputIsLeft;
 
         private AssociatedRecords(List<OuterRecord> records) {
-            checkNotNull(records);
             this.records = records;
+            this.numRecords = records.size();
+        }
+
+        private AssociatedRecords(
+                JoinCondition condition,
+                JoinRecordStateView otherSideStateView,
+                RowData input,
+                boolean inputIsLeft,
+                int numRecords
+                ) {
+            this.condition = condition;
+            this.otherSideStateView = otherSideStateView;
+            this.input = input;
+            this.inputIsLeft = inputIsLeft;
+            this.numRecords = numRecords;
+            this.records = null;
         }
 
         public boolean isEmpty() {
-            return records.isEmpty();
+            return numRecords == 0;
         }
 
         public int size() {
-            return records.size();
+            return numRecords;
         }
 
         /**
          * Gets the iterable of records. This is usually be called when the {@link
          * AssociatedRecords} is from inner side.
          */
-        public Iterable<RowData> getRecords() {
-            return new RecordsIterable(records);
+        public Iterable<RowData> getRecords() throws Exception {
+            if (records != null) {
+                // use the cached associations list
+                return new RecordsIterable(records);
+            } else {
+                // XXX(sergei): for now we only support inner joins
+                // recompute the associations
+                final Iterator<RowData> iterator = otherSideStateView.getRecords().iterator();
+
+                return new Iterable<RowData>() {
+
+                    public Iterator<RowData> iterator() {
+
+                        return new Iterator<RowData>() {
+                            private RowData nextRecord = null;
+
+                            public boolean hasNext() {
+                                if (nextRecord != null) {
+                                    return true;
+                                }
+                                while (iterator.hasNext()) {
+                                    RowData record = iterator.next();
+                                    boolean matched =
+                                        inputIsLeft
+                                            ? condition.apply(input, record)
+                                            : condition.apply(record, input);
+                                    if (matched) {
+                                        nextRecord = record;
+                                        return true;
+                                    }
+                                }
+                                return false;
+                            }
+
+                            public RowData next() {
+                                if (hasNext()) {
+                                    RowData record = nextRecord;
+                                    nextRecord = null;
+                                    return record;
+                                } else {
+                                    throw new java.util.NoSuchElementException();
+                                }
+                            }
+                        };
+                    }
+                };
+
+            }
         }
 
         /**
@@ -229,9 +299,8 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
                 JoinCondition condition)
                 throws Exception {
             List<OuterRecord> associations = new ArrayList<>();
-            int rows_fetched = 0;
-            int rows_matched = 0;
-
+            int rowsFetched = 0;
+            int rowsMatched = 0;
 
             if (otherSideStateView instanceof OuterJoinRecordStateView) {
                 OuterJoinRecordStateView outerStateView =
@@ -243,17 +312,13 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
                             inputIsLeft
                                     ? condition.apply(input, record.f0)
                                     : condition.apply(record.f0, input);
-		            rows_fetched = rows_fetched + 1;
-                        if (matched) {
-			                rows_matched = rows_matched + 1;
-                            associations.add(new OuterRecord(record.f0, record.f1));
-                        }
+		            rowsFetched = rowsFetched + 1;
+
+                    if (matched) {
+			            rowsMatched = rowsMatched + 1;
+                        associations.add(new OuterRecord(record.f0, record.f1));
                     }
-            		if ((rows_fetched > 1000 || rows_fetched - rows_matched > 500) && leftType != null && rightType != null) {
-                        RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(inputIsLeft ? leftType : rightType);
-		                LOG.info(operator_name + ": EXPENSIVE Outer Join fetched: " + rows_fetched + ", matched " + rows_matched);
-		                LOG.info(operator_name + ": EXPENSIVE joining " + (inputIsLeft ? " left input: " : "right input: ") + rowStringSerializer.asString(input));
-        		    }
+                }
             } else {
                 Iterable<RowData> records = otherSideStateView.getRecords();
                 for (RowData record : records) {
@@ -261,21 +326,38 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
                             inputIsLeft
                                     ? condition.apply(input, record)
                                     : condition.apply(record, input);
-		            rows_fetched = rows_fetched + 1;
+		            rowsFetched = rowsFetched + 1;
 
                     if (matched) {
-			            rows_matched = rows_matched + 1;
+			            rowsMatched = rowsMatched + 1;
                         // use -1 as the default number of associations
-                        associations.add(new OuterRecord(record, -1));
+                        if (associations != null) {
+                            associations.add(new OuterRecord(record, -1));
+                            if (rowsMatched > MAX_ASSOCIATED_ROWS_CACHE_SIZE) {
+                                RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(
+                                    inputIsLeft ? leftType : rightType);
+                                LOG.info("EXPENSIVE bypassing associated row cache for: {}",
+                                    rowStringSerializer.asString(input));
+                                associations = null;
+                            }
+                        }
                     }
                 }
-		        if ((rows_fetched > 1000 || rows_fetched - rows_matched > 500)  && leftType != null && rightType != null) {
-                    RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(inputIsLeft ? leftType : rightType);
-		            LOG.info(operator_name + ": EXPENSIVE Inner Join fetched: " + rows_fetched + ", matched " + rows_matched);
-        		    LOG.info(operator_name + ": EXPENSIVE Joining " + (inputIsLeft ? " left input: " : "right input: ") + rowStringSerializer.asString(input));
-                }
             }
-            return new AssociatedRecords(associations);
+
+
+		    if ((rowsFetched > EXPENSIVE_rowsFetched_THRESHOLD || rowsFetched - rowsMatched > 500)
+                 && leftType != null && rightType != null) {
+                RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(inputIsLeft ? leftType : rightType);
+		        LOG.info(operator_name + ": EXPENSIVE Inner Join fetched: " + rowsFetched + ", matched " + rowsMatched);
+                LOG.info(operator_name + ": EXPENSIVE Joining " + (inputIsLeft ? " left input: " : "right input: ") + rowStringSerializer.asString(input));
+            }
+
+            if (associations == null) {
+                return new AssociatedRecords(condition, otherSideStateView, input, inputIsLeft, rowsMatched);
+            } else {
+                return new AssociatedRecords(associations);
+            }
         }
     }
 
