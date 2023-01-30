@@ -189,6 +189,10 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
             this.numRecords = records.size();
         }
 
+        /***
+         *  A 'streaming' implementation of AssociatedRecords, which doesn't store all records in memory. It reduces
+         *  the memory overhead at the cost of performance.
+         */
         private AssociatedRecords(
                 JoinCondition condition,
                 JoinRecordStateView otherSideStateView,
