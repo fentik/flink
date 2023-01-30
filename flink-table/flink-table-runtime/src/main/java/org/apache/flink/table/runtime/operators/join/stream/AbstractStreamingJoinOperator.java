@@ -305,6 +305,7 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
             List<OuterRecord> associations = new ArrayList<>();
             int rowsFetched = 0;
             int rowsMatched = 0;
+            boolean cacheDisabled = false;
 
             if (otherSideStateView instanceof OuterJoinRecordStateView) {
                 OuterJoinRecordStateView outerStateView =
@@ -343,6 +344,7 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
                                 LOG.info("EXPENSIVE bypassing associated row cache for: {}",
                                     rowStringSerializer.asString(input));
                                 associations = null;
+                                cacheDisabled = true;
                             }
                         }
                     }
@@ -353,7 +355,7 @@ public abstract class AbstractStreamingJoinOperator extends AbstractStreamOperat
 		    if ((rowsFetched > EXPENSIVE_rowsFetched_THRESHOLD || rowsFetched - rowsMatched > 500)
                  && leftType != null && rightType != null) {
                 RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(inputIsLeft ? leftType : rightType);
-		        LOG.info(operator_name + ": EXPENSIVE Inner Join fetched: " + rowsFetched + ", matched " + rowsMatched);
+		        LOG.info(operator_name + ": EXPENSIVE Inner Join fetched: " + rowsFetched + ", matched " + rowsMatched + "(association cache disabled: " + cacheDisabled + ")");
                 LOG.info(operator_name + ": EXPENSIVE Joining " + (inputIsLeft ? " left input: " : "right input: ") + rowStringSerializer.asString(input));
             }
 
