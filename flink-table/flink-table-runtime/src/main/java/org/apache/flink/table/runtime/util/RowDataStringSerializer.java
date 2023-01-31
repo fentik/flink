@@ -34,7 +34,11 @@ public class RowDataStringSerializer implements Serializable {
     private final RowType type;
 
     public RowDataStringSerializer(InternalTypeInfo<RowData> type) {
-        this.type = type.toRowType();
+        if (type != null) {
+            this.type = type.toRowType();
+        } else {
+            this.type = null;
+        }
     }
 
     public RowDataStringSerializer(RowType type) {
@@ -42,6 +46,12 @@ public class RowDataStringSerializer implements Serializable {
     }
 
     public String asString(RowData row) {
+        // XXX(sergei): we're not always dilligent in checking that all callers pass in
+        // type information into the operator that does logging, so put in a safeguard
+        // in this class to prevent null pointer exceptions
+        if (type == null) {
+            return "[API error: RowDataStringSerializer got a `null` type, cannot decode row]";
+        }
         LogicalType[] fieldTypes =
         type.getFields().stream()
                 .map(RowType.RowField::getType)
