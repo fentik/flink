@@ -81,9 +81,6 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
     private static final String STATE_CLEARED_WARN_MSG = "The state is cleared because of state ttl. "
             + "This will result in incorrect result. You can increase the state ttl to avoid this.";
 
-    private static final int MAX_SORTED_MAP_SIZE_MULTIPLE = 5;
-    private static final int MAX_SORTED_MAP_SIZE_THRESHOLD = 1000;
-
     private final InternalTypeInfo<RowData> sortKeyType;
     private final RowDataStringSerializer sortKeySerializer;
     private final RowDataStringSerializer inputRowSerializer;
@@ -267,18 +264,6 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
         isStreamMode = true;
     }
 
-    private boolean isStateTooLarge(int sortedMapSize) {
-        if (sortedMapSize < MAX_SORTED_MAP_SIZE_THRESHOLD) {
-            return false;
-        }
-
-        if (sortedMapSize > MAX_SORTED_MAP_SIZE_MULTIPLE * rankEnd) {
-            return true;
-        }
-
-        return false;
-    }
-
     @Override
     public void processElement(RowData input, Context ctx, Collector<RowData> out)
             throws Exception {
@@ -293,35 +278,6 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
         boolean isAccumulate = RowDataUtil.isAccumulateMsg(input);
         input.setRowKind(RowKind.INSERT); // erase row kind for further state accessing
         if (isAccumulate) {
-            // XXX(sergei): we need to cap the maximum amount of state that the rank operator
-            // will keep because on some workloads, the state can get incredibly large and
-            // cause serious performance issues
-            //
-            // NOTE: this is the short circuit path; on some workloads, values will be
-            // inserted into the range and displace older entries, so we also need to
-            // have logic after state update to trim state size
-            //
-            // The logic for state management is as follows:
-            //   if the sortedMap size exceeds rankEnd * MAX_SORTED_MAP_SIZE_MULTIPLE,
-            //   then we will not insert the record into the state
-            //
-            // because the incoming row dows not land in the range that would cause us
-            // to emit anything, we can silently drop the row on ingestion
-
-            // Part 1 of 2 of large state management
-            if (isStateTooLarge(sortedMap.size() + 1)) {
-                // we've reached maximum threshold, make sure that we're not
-                // inserting a row in the rank range, which would require us
-                // to process state (retract/insert)
-                int numPreceding = sortedMap.headMap(sortKey).size();
-                if (numPreceding > rankEnd) {
-                    // outside of rank range, safe to drop
-                    LOG.debug("{}: STATE_TOO_LARGE at: {} preceding {} with rank end {} dropping record",
-                        getPrintableName(), sortedMap.size(), numPreceding, rankEnd);
-                    return;
-                }
-            }
-
             // update sortedMap
             if (sortedMap.containsKey(sortKey)) {
                 sortedMap.put(sortKey, sortedMap.get(sortKey) + 1);
@@ -346,25 +302,14 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
             inputs.add(input);
             dataState.put(sortKey, inputs);
 
-            // Part 2 of 2 of large state management: trim the tail
-            if (isStateTooLarge(sortedMap.size())) {
-                RowData lastKey = sortedMap.lastKey();
-                long count = sortedMap.get(lastKey) - 1;
-                List<RowData> rows = dataState.get(lastKey);
-                if (count == 0) {
-                    // we only have one row for this key, simple case
-                    LOG.debug("{}: STATE_TOO_LARGE tail remove count == 0");
-                    sortedMap.remove(lastKey);
-                    dataState.remove(sortKey);
-                } else {
-                    // remove a single row from state
-                    LOG.debug("{}: STATE_TOO_LARGE tail remove count > 0");
-                    sortedMap.put(lastKey, count);
-                    rows.remove(0);
-                    dataState.put(sortKey, rows);
-                }
-            }
-
+            // try {
+            //     for (Method m : ctx.getClass().getDeclaredMethods()) {
+            //         LOG.info("SERGEI {}", m);
+            //     }
+            // } catch (Exception e) {
+            //     LOG.info("SERGEI {}", e);
+            // }
+            // LOG.info("SERGEI >>>>>>{}<<<<<<<", ctx.getClass());
             if (ctx.shouldLogInput()) {
                 LOG.info("{}: isAccumulate = TRUE (INSERT) sortedMap.size() = {} dataState.get(sortKey).size() = {} input {} sortKey {}",
                     getPrintableName(),
@@ -393,8 +338,15 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
                 }
             } else {
                 if (sortedMap.isEmpty()) {
-                    // XXX(sergei): this can now happen by design
-                    LOG.debug("Attempt to retract non-existed record");
+                    if (lenient) {
+                        LOG.warn(STATE_CLEARED_WARN_MSG);
+                    } else {
+                        throw new RuntimeException(STATE_CLEARED_WARN_MSG);
+                    }
+                } else {
+                    LOG.warn("Attempt to retract non-existed record"); //, inputRowSerializer.asString(input));
+                    // throw new RuntimeException(
+                    // "Can not retract a non-existent record. This should never happen.");
                 }
             }
 
@@ -440,6 +392,7 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
         if (lenient) {
             // Sync with dataState
             sortedMapIterator.remove();
+            LOG.warn(STATE_CLEARED_WARN_MSG);
         } else {
             throw new RuntimeException(STATE_CLEARED_WARN_MSG);
         }
