@@ -373,7 +373,6 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
                 }
             }
 
-                LOG.info("SERGEI {}", ctx.getClass());
             if (ctx.shouldLogInput()) {
                 LOG.info("{}: isAccumulate = FALSE (DELETE) sortedMap.size() = {} dataState.get(sortKey).size() = {} input {} sortKey {} stateRemoved = {}",
                     getPrintableName(), sortedMap.size(), inputs == null ? 0 : inputs.size(),
