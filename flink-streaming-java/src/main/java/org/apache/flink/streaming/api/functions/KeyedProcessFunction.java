@@ -144,6 +144,12 @@ public abstract class KeyedProcessFunction<K, I, O> extends AbstractRichFunction
          */
         public abstract Long timestamp();
 
+        public boolean shouldLogInput() {
+            // default implenetation returns false and operators that
+            // support it can override
+            return false;
+        }
+
         /** A {@link TimerService} for querying time and registering timers. */
         public abstract TimerService timerService();
 

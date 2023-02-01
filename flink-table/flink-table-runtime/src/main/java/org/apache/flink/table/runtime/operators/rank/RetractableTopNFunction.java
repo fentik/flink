@@ -58,6 +58,8 @@ import java.util.Map;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
+import java.lang.reflect.Method;
+
 import java.io.IOException;
 
 /**
@@ -176,10 +178,6 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
         return !this.isStreamMode;
     }
 
-    private String getPrintableName() {
-        return getRuntimeContext().getJobId() + " " + getRuntimeContext().getTaskName();
-    }
-
     private boolean equalsIgnoreRowKind(RowData row, RowData input) {
         // we need to do a comparison that ignores row kind in cases
         // where we're looking at our internal state against the input
@@ -275,6 +273,7 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
             sortedMap = new TreeMap<>(sortKeyComparator);
         }
 
+
         RowData sortKey = sortKeySelector.getKey(input);
         boolean isAccumulate = RowDataUtil.isAccumulateMsg(input);
         input.setRowKind(RowKind.INSERT); // erase row kind for further state accessing
@@ -302,6 +301,22 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
             }
             inputs.add(input);
             dataState.put(sortKey, inputs);
+
+            // try {
+            //     for (Method m : ctx.getClass().getDeclaredMethods()) {
+            //         LOG.info("SERGEI {}", m);
+            //     }
+            // } catch (Exception e) {
+            //     LOG.info("SERGEI {}", e);
+            // }
+            // LOG.info("SERGEI >>>>>>{}<<<<<<<", ctx.getClass());
+            if (ctx.shouldLogInput()) {
+                LOG.info("{}: isAccumulate = TRUE (INSERT) sortedMap.size() = {} dataState.get(sortKey).size() = {} input {} sortKey {}",
+                    getPrintableName(),
+                    sortedMap.size(), inputs.size(),
+                    inputRowSerializer.asString(input),
+                    sortKeySerializer.asString(sortKey));
+            }
         } else {
             final boolean stateRemoved;
             // emit updates first
@@ -335,10 +350,12 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
                 }
             }
 
+            List<RowData> inputs = null;
+
             if (!stateRemoved) {
                 // the input record has not been removed from state
                 // should update the data state
-                List<RowData> inputs = dataState.get(sortKey);
+                inputs = dataState.get(sortKey);
                 if (inputs != null) {
                     // comparing record by equaliser
                     Iterator<RowData> inputsIter = inputs.iterator();
@@ -354,6 +371,15 @@ public class RetractableTopNFunction extends AbstractTopNFunction {
                         dataState.put(sortKey, inputs);
                     }
                 }
+            }
+
+                LOG.info("SERGEI {}", ctx.getClass());
+            if (ctx.shouldLogInput()) {
+                LOG.info("{}: isAccumulate = FALSE (DELETE) sortedMap.size() = {} dataState.get(sortKey).size() = {} input {} sortKey {} stateRemoved = {}",
+                    getPrintableName(), sortedMap.size(), inputs == null ? 0 : inputs.size(),
+                    inputRowSerializer.asString(input),
+                    sortKeySerializer.asString(sortKey),
+                    stateRemoved);
             }
         }
         treeMap.update(sortedMap);

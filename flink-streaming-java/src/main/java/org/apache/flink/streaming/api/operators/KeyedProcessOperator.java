@@ -120,6 +120,10 @@ public class KeyedProcessOperator<K, IN, OUT>
         onTimerContext.timer = null;
     }
 
+    public KeyedProcessOperator<K, IN, OUT> getKeyedProcessOperator() {
+        return this;
+    }
+
     private class ContextImpl extends KeyedProcessFunction<K, IN, OUT>.Context {
 
         private final TimerService timerService;
@@ -145,6 +149,11 @@ public class KeyedProcessOperator<K, IN, OUT>
         @Override
         public TimerService timerService() {
             return timerService;
+        }
+
+        @Override
+        public boolean shouldLogInput() {
+            return getKeyedProcessOperator().shouldLogInput();
         }
 
         @Override
