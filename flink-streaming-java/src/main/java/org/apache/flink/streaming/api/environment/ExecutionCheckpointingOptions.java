@@ -289,4 +289,14 @@ public class ExecutionCheckpointingOptions {
                             "Defines the maximum number of subtasks that share the same channel state file. "
                                     + "It can reduce the number of small files when enable unaligned checkpoint. "
                                     + "Each subtask will create a new channel state file when this is configured to 1.");
+
+    public static final ConfigOption<String> PER_OPERATOR_PARALLELISM = ConfigOptions
+            .key("execution.checkpointing.per-operator-parallelism")
+            .stringType()
+            .defaultValue("")
+            .withDescription(
+                    "Sets per operator ID parallelism to help us selectively rescale down jobs with small"
+                            + " operator states. The format is a list of opId,parallelism pairs in string format."
+                            + " Exammple: '927799aa5f58e46f12593a76acc4dba3,64,ed48e05970c6882d033071b3313259ee,64'");
+
 }
