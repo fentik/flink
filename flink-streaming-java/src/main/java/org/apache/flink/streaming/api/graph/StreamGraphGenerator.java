@@ -310,6 +310,13 @@ public class StreamGraphGenerator {
 
     public StreamGraph generate() {
         streamGraph = new StreamGraph(executionConfig, checkpointConfig, savepointRestoreSettings);
+        streamGraph.setEnableCheckpointsAfterTasksFinish(
+                configuration.get(
+                        ExecutionCheckpointingOptions.ENABLE_CHECKPOINTS_AFTER_TASKS_FINISH));
+        streamGraph.setHoldBatchForSavepoint(
+                configuration.get(ExecutionCheckpointingOptions.HOLD_BATCH_FOR_SAVEPOINT));
+        streamGraph.setPerOperatorParallelism(
+                configuration.get(ExecutionCheckpointingOptions.PER_OPERATOR_PARALLELISM));
         shouldExecuteInBatchMode = shouldExecuteInBatchMode();
         configureStreamGraph(streamGraph);
 
