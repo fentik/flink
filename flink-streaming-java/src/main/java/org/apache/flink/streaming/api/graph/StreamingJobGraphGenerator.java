@@ -1126,6 +1126,10 @@ public class StreamingJobGraphGenerator {
                 .set(
                         ExecutionCheckpointingOptions.ENABLE_CHECKPOINTS_AFTER_TASKS_FINISH,
                         streamGraph.isEnableCheckpointsAfterTasksFinish());
+        config.getConfiguration()
+                .set(
+                        ExecutionCheckpointingOptions.HOLD_BATCH_FOR_SAVEPOINT,
+                        streamGraph.isHoldBatchForSavepoint());
         config.setCheckpointMode(getCheckpointingMode(checkpointCfg));
         config.setUnalignedCheckpointsEnabled(checkpointCfg.isUnalignedCheckpointsEnabled());
         config.setAlignedCheckpointTimeout(checkpointCfg.getAlignedCheckpointTimeout());
