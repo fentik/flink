@@ -28,6 +28,7 @@ import org.apache.calcite.plan.hep.HepMatchOrder
 /** Defines a sequence of programs to optimize for stream table plan. */
 object FlinkStreamProgram {
 
+  val SALT_JOINS = "salt_joins"
   val SUBQUERY_REWRITE = "subquery_rewrite"
   val TEMPORAL_JOIN_REWRITE = "temporal_join_rewrite"
   val DECORRELATE = "decorrelate"
@@ -43,6 +44,22 @@ object FlinkStreamProgram {
 
   def buildProgram(tableConfig: ReadableConfig): FlinkChainedProgram[StreamOptimizeContext] = {
     val chainedProgram = new FlinkChainedProgram[StreamOptimizeContext]()
+
+    // salt left joins
+    chainedProgram.addLast(
+      SALT_JOINS,
+      FlinkGroupProgramBuilder
+        .newBuilder[StreamOptimizeContext]
+        .addProgram(
+          FlinkHepRuleSetProgramBuilder.newBuilder
+            .setHepRulesExecutionType(HEP_RULES_EXECUTION_TYPE.RULE_SEQUENCE)
+            .setHepMatchOrder(HepMatchOrder.BOTTOM_UP)
+            .add(FlinkStreamRuleSets.RUBICON_RULES)
+            .build(),
+          "salt left joins to prevent hot nulls data skew"
+        )
+        .build()
+    )
 
     // rewrite sub-queries to joins
     chainedProgram.addLast(
