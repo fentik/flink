@@ -103,11 +103,16 @@ public class FlinkJoinSaltNullsRule extends RelRule<FlinkJoinSaltNullsRule.Confi
     public boolean matches(RelOptRuleCall call) {
         final Join join = call.rel(0);
         final JoinInfo joinInfo = join.analyzeCondition();
+        final RelBuilder relBuilder = call.builder();
 
         if (join.getJoinType() == JoinRelType.LEFT && joinInfo.isEqui()) {
-            // Look for left joins with an equijoin condition
-            return true;
+            try {
+                relBuilder.push(join).field("__rubisalt_left");
+            } catch (Exception e) {
+                return true;
+            }
         }
+
         return false;
     }
 
@@ -117,9 +122,6 @@ public class FlinkJoinSaltNullsRule extends RelRule<FlinkJoinSaltNullsRule.Confi
         final RelNode origLeft = call.rel(1);
         final RelNode origRight = call.rel(2);
         final RelBuilder relBuilder = call.builder();
-        final RexBuilder rexBuilder = origJoin.getCluster().getRexBuilder();
-        final RelDataType intType = rexBuilder.getTypeFactory().createSqlType(SqlTypeName.INTEGER);
-
 
         List<String> leftFieldNames = new ArrayList<>(origLeft.getRowType().getFieldNames());
         leftFieldNames.add("__rubisalt_left");
@@ -150,11 +152,39 @@ public class FlinkJoinSaltNullsRule extends RelRule<FlinkJoinSaltNullsRule.Confi
 
         LOG.info("SERGEI rightSaltedProject {}", rightSaltedProject);
 
-        RexNode saltyJoinCondition =
+        // adjust right references by 1 to accomodate the salt field
+        RexNode saltyJoinCondition = origJoinCondition.accept(new RexShuttle() {
+            public RexNode visitInputRef(RexInputRef node) {
+                if (node.getIndex() >= origLeft.getRowType().getFieldCount()) {
+                    return new RexInputRef(node.getIndex() + 1, node.getType());
+                } else {
+                    return node;
+                }
+            }
+        });
+
+        RexNode leftSaltRef = relBuilder.push(leftSaltedProject).field("__rubisalt_left");
+
+        RexNode rightSaltRef =
             relBuilder
-                .push(leftSaltedProject)
                 .push(rightSaltedProject)
-                .and(origJoinCondition, relBuilder.equals(relBuilder.field(1), relBuilder.field(2)));
+                .field("__rubisalt_right")
+                .accept(new RexShuttle() {
+                    // shift right references by left field amount
+                    public RexNode visitInputRef(RexInputRef node) {
+                        return new RexInputRef(node.getIndex() + leftSaltedProject.getRowType().getFieldCount(), node.getType());
+                    }
+                });
+
+        saltyJoinCondition = relBuilder.and(saltyJoinCondition, relBuilder.equals(leftSaltRef, rightSaltRef));
+
+        saltyJoinCondition.accept(new RexShuttle() {
+            public RexNode visitInputRef(RexInputRef node) {
+                LOG.info("SERGEI salty cond visitor innput ref {}", node);
+                return node;
+            }
+        });
+
 
         final Join saltyJoin = origJoin.copy(
             origJoin.getTraitSet(),
@@ -174,16 +204,7 @@ public class FlinkJoinSaltNullsRule extends RelRule<FlinkJoinSaltNullsRule.Confi
             
         LOG.info("SERGEI salted project {}", saltyProject);
 
-        // RexNode cond = origJoin.getCondition();
-        // cond.accept(new RexShuttle() {
-        //     public RexNode visitInputRef(RexInputRef node) {
-        //         LOG.info("SERGEI cond visitor innput ref {}", node);
-        //         return node;
-        //     }
-        // });
-
         call.transformTo(saltyProject);
-        // call.transformTo(saltyJoin);
     }
 
     /** Rule configuration. */
