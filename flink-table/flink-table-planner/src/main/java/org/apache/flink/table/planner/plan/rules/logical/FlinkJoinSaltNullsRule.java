@@ -18,51 +18,26 @@
 
 package org.apache.flink.table.planner.plan.rules.logical;
 
-import org.apache.flink.table.api.TableException;
-
 import org.apache.calcite.plan.RelOptRuleCall;
-import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.plan.RelRule;
-import org.apache.calcite.plan.hep.HepRelVertex;
 import org.apache.calcite.rel.RelNode;
-import org.apache.calcite.rel.core.CorrelationId;
 import org.apache.calcite.rel.core.Join;
 import org.apache.calcite.rel.core.JoinInfo;
 import org.apache.calcite.rel.core.JoinRelType;
 import org.apache.calcite.rel.logical.LogicalJoin;
-import org.apache.calcite.rel.logical.LogicalProject;
-import org.apache.calcite.rel.rules.CoreRules;
-import org.apache.calcite.rel.rules.FilterMultiJoinMergeRule;
-import org.apache.calcite.rel.rules.MultiJoin;
-import org.apache.calcite.rel.rules.ProjectMultiJoinMergeRule;
 import org.apache.calcite.rel.rules.TransformationRule;
 import org.apache.calcite.rel.type.RelDataType;
-import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexShuttle;
-import org.apache.calcite.rex.RexUtil;
-import org.apache.calcite.rex.RexVisitor;
-import org.apache.calcite.rex.RexVisitorImpl;
 import org.apache.calcite.tools.RelBuilder;
 import org.apache.calcite.tools.RelBuilderFactory;
-import org.apache.calcite.util.ImmutableBitSet;
-import org.apache.calcite.util.ImmutableIntList;
-import org.apache.calcite.util.Pair;
 import org.apache.calcite.sql.type.SqlTypeName;
-import org.apache.calcite.sql.fun.SqlRandFunction;
-import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.flink.table.planner.functions.sql.FlinkSqlOperatorTable;
 
-
-
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -105,15 +80,16 @@ public class FlinkJoinSaltNullsRule extends RelRule<FlinkJoinSaltNullsRule.Confi
     public boolean matches(RelOptRuleCall call) {
         final Join join = call.rel(0);
         final JoinInfo joinInfo = join.analyzeCondition();
-        final RelBuilder relBuilder = call.builder();
 
         // look for left equijoins that we have not transformed yet
         if (join.getJoinType() == JoinRelType.LEFT && joinInfo.isEqui()) {
-            try {
-                relBuilder.push(join).field(LEFT_SALT_NAME);
-            } catch (Exception e) {
-                return true;
+            for (String fieldName : join.getRowType().getFieldNames()) {
+                if (fieldName.equals(LEFT_SALT_NAME) || fieldName.equals(RIGHT_SALT_NAME)) {
+                    // optimization already applied, skip
+                    return false;
+                }
             }
+            return true;
         }
 
         return false;
@@ -142,24 +118,17 @@ public class FlinkJoinSaltNullsRule extends RelRule<FlinkJoinSaltNullsRule.Confi
             }
         });
 
-        LOG.info("SERGEI left null checks {}", leftNullChecks);
-
         RexNode leftSaltExpr =
             relBuilder.call(FlinkSqlOperatorTable.CASE,
                             relBuilder.or(leftNullChecks),
                             relBuilder.call(FlinkSqlOperatorTable.RAND_INTEGER, rexBuilder.makeLiteral(128, intType, false)),
                             rexBuilder.makeLiteral(0, intType, false));
 
-        LOG.info("SERGEI left salt expr {}", leftSaltExpr);
-
         RelNode leftSaltedProject = 
             relBuilder
                 .push(origLeft)
                 .project(Iterables.concat(relBuilder.fields(), ImmutableList.of(leftSaltExpr)), leftFieldNames, true)
                 .build();
-
-        LOG.info("SERGEI leftSaltedProject {} types {}", leftSaltedProject, leftSaltedProject.getRowType());
-
 
         List<String> rightFieldNames = new ArrayList<>(origRight.getRowType().getFieldNames());
         rightFieldNames.add(RIGHT_SALT_NAME);
@@ -190,15 +159,11 @@ public class FlinkJoinSaltNullsRule extends RelRule<FlinkJoinSaltNullsRule.Confi
                         }
                 });
 
-
         RelNode rightSaltedProject = 
             relBuilder
                 .push(origRight)
                 .project(Iterables.concat(relBuilder.fields(), ImmutableList.of(rightSaltExpr)), rightFieldNames, true)
                 .build();
-
-
-        LOG.info("SERGEI rightSaltedProject {}", rightSaltedProject);
 
         // adjust right references by 1 to accomodate the salt field
         RexNode saltyJoinCondition = origJoinCondition.accept(new RexShuttle() {
@@ -212,22 +177,12 @@ public class FlinkJoinSaltNullsRule extends RelRule<FlinkJoinSaltNullsRule.Confi
         });
 
         RexNode leftSaltRef = relBuilder.push(leftSaltedProject).field(LEFT_SALT_NAME);
-
-        LOG.info("SERGEI leftSaltedProject.getRowType().getFieldCount() = {}", leftSaltedProject.getRowType().getFieldCount());
         RexNode rightSaltRef = relBuilder.push(rightSaltedProject).field(RIGHT_SALT_NAME);
         rightSaltRef = new RexInputRef(
             ((RexInputRef)rightSaltRef).getIndex() + leftSaltedProject.getRowType().getFieldCount(),
             rightSaltRef.getType());
 
         saltyJoinCondition = relBuilder.and(saltyJoinCondition, relBuilder.equals(leftSaltRef, rightSaltRef));
-
-        saltyJoinCondition.accept(new RexShuttle() {
-            public RexNode visitInputRef(RexInputRef node) {
-                LOG.info("SERGEI salty cond visitor innput ref {}", node);
-                return node;
-            }
-        });
-
 
         final Join saltyJoin = origJoin.copy(
             origJoin.getTraitSet(),
@@ -237,16 +192,12 @@ public class FlinkJoinSaltNullsRule extends RelRule<FlinkJoinSaltNullsRule.Confi
             origJoin.getJoinType(),
             false);
 
-        LOG.info("SERGEI salted join {} row type {}", saltyJoin, saltyJoin.getRowType());
-
         final RelNode saltyProject =
             relBuilder
                 .push(saltyJoin)
                 .projectExcept(relBuilder.fields(ImmutableList.of(LEFT_SALT_NAME, RIGHT_SALT_NAME)))
                 .build();
             
-        LOG.info("SERGEI salted project {}", saltyProject);
-
         call.transformTo(saltyProject);
     }
 

@@ -45,22 +45,6 @@ object FlinkStreamProgram {
   def buildProgram(tableConfig: ReadableConfig): FlinkChainedProgram[StreamOptimizeContext] = {
     val chainedProgram = new FlinkChainedProgram[StreamOptimizeContext]()
 
-    // salt left joins
-    chainedProgram.addLast(
-      SALT_JOINS,
-      FlinkGroupProgramBuilder
-        .newBuilder[StreamOptimizeContext]
-        .addProgram(
-          FlinkHepRuleSetProgramBuilder.newBuilder
-            .setHepRulesExecutionType(HEP_RULES_EXECUTION_TYPE.RULE_SEQUENCE)
-            .setHepMatchOrder(HepMatchOrder.BOTTOM_UP)
-            .add(FlinkStreamRuleSets.RUBICON_RULES)
-            .build(),
-          "salt left joins to prevent hot nulls data skew"
-        )
-        .build()
-    )
-
     // rewrite sub-queries to joins
     chainedProgram.addLast(
       SUBQUERY_REWRITE,
@@ -246,6 +230,22 @@ object FlinkStreamProgram {
           .build()
       )
     }
+
+    // salt left joins
+    chainedProgram.addLast(
+      SALT_JOINS,
+      FlinkGroupProgramBuilder
+        .newBuilder[StreamOptimizeContext]
+        .addProgram(
+          FlinkHepRuleSetProgramBuilder.newBuilder
+            .setHepRulesExecutionType(HEP_RULES_EXECUTION_TYPE.RULE_SEQUENCE)
+            .setHepMatchOrder(HepMatchOrder.BOTTOM_UP)
+            .add(FlinkStreamRuleSets.RUBICON_RULES)
+            .build(),
+          "salt left joins to prevent hot nulls data skew"
+        )
+        .build()
+    )
 
     // project rewrite
     chainedProgram.addLast(
