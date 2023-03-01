@@ -45,14 +45,15 @@ import org.apache.calcite.rex.RexShuttle;
 import org.apache.calcite.rex.RexUtil;
 import org.apache.calcite.rex.RexVisitor;
 import org.apache.calcite.rex.RexVisitorImpl;
-import org.apache.calcite.sql.fun.SqlRandIntegerFunction;
 import org.apache.calcite.tools.RelBuilder;
 import org.apache.calcite.tools.RelBuilderFactory;
 import org.apache.calcite.util.ImmutableBitSet;
 import org.apache.calcite.util.ImmutableIntList;
 import org.apache.calcite.util.Pair;
 import org.apache.calcite.sql.type.SqlTypeName;
-import org.apache.flink.table.planner.plan.nodes.logical.FlinkLogicalWatermarkAssigner;
+import org.apache.calcite.sql.fun.SqlRandFunction;
+import org.apache.calcite.sql.fun.SqlStdOperatorTable;
+import org.apache.flink.table.planner.functions.sql.FlinkSqlOperatorTable;
 
 
 
@@ -110,20 +111,6 @@ public class FlinkJoinSaltNullsRule extends RelRule<FlinkJoinSaltNullsRule.Confi
         return false;
     }
 
-    private LogicalProject getSourceProject(RelNode node) {
-        LOG.info("SERGEI here {}", node);
-        for (RelNode n : node.getInputs()) {
-            if (n instanceof HepRelVertex) {
-                n = ((HepRelVertex)n).getCurrentRel();
-            }
-            if (n instanceof LogicalProject) {
-                return (LogicalProject)n;
-            }
-            return getSourceProject(n);
-        }
-        return null;
-    }
-
     @Override
     public void onMatch(RelOptRuleCall call) {
         final Join origJoin = call.rel(0);
@@ -137,7 +124,7 @@ public class FlinkJoinSaltNullsRule extends RelRule<FlinkJoinSaltNullsRule.Confi
         List<String> leftFieldNames = new ArrayList<>(origLeft.getRowType().getFieldNames());
         leftFieldNames.add("__rubisalt_left");
 
-        RexNode leftSaltExpr = relBuilder.call(new SqlRandIntegerFunction(), relBuilder.push(origLeft).field(0));
+        RexNode leftSaltExpr = relBuilder.call(FlinkSqlOperatorTable.RAND, ImmutableList.of());
 
         RelNode leftSaltedProject = 
             relBuilder
@@ -145,13 +132,13 @@ public class FlinkJoinSaltNullsRule extends RelRule<FlinkJoinSaltNullsRule.Confi
                 .project(Iterables.concat(relBuilder.fields(), ImmutableList.of(leftSaltExpr)), leftFieldNames, true)
                 .build();
 
-        LOG.info("SERGEI leftSaltedProject {}", leftSaltedProject);
+        LOG.info("SERGEI leftSaltedProject {} types {}", leftSaltedProject, leftSaltedProject.getRowType());
 
 
         List<String> rightFieldNames = new ArrayList<>(origRight.getRowType().getFieldNames());
         rightFieldNames.add("__rubisalt_right");
 
-        RexNode rightSaltExpr = relBuilder.call(new SqlRandIntegerFunction(), relBuilder.push(origRight).field(0));
+        RexNode rightSaltExpr = relBuilder.call(FlinkSqlOperatorTable.RAND, ImmutableList.of());
 
         RelNode rightSaltedProject = 
             relBuilder
