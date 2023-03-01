@@ -73,7 +73,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
     private transient Counter leftInputDroppedNullKeyCount;
     private transient Counter rightInputDroppedNullKeyCount;
 
-    private transient boolean isEquijoin;
+    private boolean isEquijoin;
 
     public StreamingJoinOperator(
             InternalTypeInfo<RowData> leftType,
@@ -87,7 +87,8 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
             long stateRetentionTime,
             boolean isBatchBackfillEnabled,
             boolean isMinibatchEnabled,
-            int maxMinibatchSize) {
+            int maxMinibatchSize,
+            boolean isEquijoin) {
         super(
                 leftType,
                 rightType,
@@ -101,6 +102,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         this.rightIsOuter = rightIsOuter;
         this.isMinibatchEnabled = isMinibatchEnabled;
         this.maxMinibatchSize = maxMinibatchSize;
+        this.isEquijoin = isEquijoin;
     }
 
     @Override
@@ -117,9 +119,6 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         this.rightInputNullKeyCount = getRuntimeContext().getMetricGroup().counter("join.rightInputNullKeyCount");
         this.leftInputDroppedNullKeyCount = getRuntimeContext().getMetricGroup().counter("join.leftInputDroppedNullKeyCount");
         this.rightInputDroppedNullKeyCount = getRuntimeContext().getMetricGroup().counter("join.rightInputDroppedNullKeyCount");
-
-        // XXX(sergei): this is a LIE -- we need to check the join condition
-        isEquijoin = true;
 
         // initialize states
         if (leftIsOuter) {
