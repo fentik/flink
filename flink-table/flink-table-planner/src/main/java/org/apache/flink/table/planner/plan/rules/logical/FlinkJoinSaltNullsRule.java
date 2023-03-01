@@ -75,6 +75,8 @@ import com.google.common.collect.Iterables;
 public class FlinkJoinSaltNullsRule extends RelRule<FlinkJoinSaltNullsRule.Config>
         implements TransformationRule {
     private static final Logger LOG = LoggerFactory.getLogger(FlinkJoinSaltNullsRule.class);
+    private static final String LEFT_SALT_NAME = "__rubisalt_left";
+    private static final String RIGHT_SALT_NAME = "__rubisalt_right";
 
     public static final FlinkJoinSaltNullsRule INSTANCE =
             FlinkJoinSaltNullsRule.Config.DEFAULT.toRule();
@@ -108,7 +110,7 @@ public class FlinkJoinSaltNullsRule extends RelRule<FlinkJoinSaltNullsRule.Confi
         // look for left equijoins that we have not transformed yet
         if (join.getJoinType() == JoinRelType.LEFT && joinInfo.isEqui()) {
             try {
-                relBuilder.push(join).field("__rubisalt_left");
+                relBuilder.push(join).field(LEFT_SALT_NAME);
             } catch (Exception e) {
                 return true;
             }
@@ -128,7 +130,7 @@ public class FlinkJoinSaltNullsRule extends RelRule<FlinkJoinSaltNullsRule.Confi
         final RelDataType intType = rexBuilder.getTypeFactory().createSqlType(SqlTypeName.INTEGER);
 
         List<String> leftFieldNames = new ArrayList<>(origLeft.getRowType().getFieldNames());
-        leftFieldNames.add("__rubisalt_left");
+        leftFieldNames.add(LEFT_SALT_NAME);
 
         List<RexNode> leftNullChecks = new ArrayList<>();
         origJoinCondition.accept(new RexShuttle() {
@@ -160,7 +162,7 @@ public class FlinkJoinSaltNullsRule extends RelRule<FlinkJoinSaltNullsRule.Confi
 
 
         List<String> rightFieldNames = new ArrayList<>(origRight.getRowType().getFieldNames());
-        rightFieldNames.add("__rubisalt_right");
+        rightFieldNames.add(RIGHT_SALT_NAME);
 
         List<RexNode> rightNullChecks = new ArrayList<>();
         origJoinCondition.accept(new RexShuttle() {
@@ -209,10 +211,10 @@ public class FlinkJoinSaltNullsRule extends RelRule<FlinkJoinSaltNullsRule.Confi
             }
         });
 
-        RexNode leftSaltRef = relBuilder.push(leftSaltedProject).field("__rubisalt_left");
+        RexNode leftSaltRef = relBuilder.push(leftSaltedProject).field(LEFT_SALT_NAME);
 
         LOG.info("SERGEI leftSaltedProject.getRowType().getFieldCount() = {}", leftSaltedProject.getRowType().getFieldCount());
-        RexNode rightSaltRef = relBuilder.push(rightSaltedProject).field("__rubisalt_right");
+        RexNode rightSaltRef = relBuilder.push(rightSaltedProject).field(RIGHT_SALT_NAME);
         rightSaltRef = new RexInputRef(
             ((RexInputRef)rightSaltRef).getIndex() + leftSaltedProject.getRowType().getFieldCount(),
             rightSaltRef.getType());
@@ -240,7 +242,7 @@ public class FlinkJoinSaltNullsRule extends RelRule<FlinkJoinSaltNullsRule.Confi
         final RelNode saltyProject =
             relBuilder
                 .push(saltyJoin)
-                .projectExcept(relBuilder.fields(ImmutableList.of("__rubisalt_left", "__rubisalt_right")))
+                .projectExcept(relBuilder.fields(ImmutableList.of(LEFT_SALT_NAME, RIGHT_SALT_NAME)))
                 .build();
             
         LOG.info("SERGEI salted project {}", saltyProject);
