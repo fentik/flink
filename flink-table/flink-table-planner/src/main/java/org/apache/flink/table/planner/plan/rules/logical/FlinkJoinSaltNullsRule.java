@@ -124,7 +124,7 @@ public class FlinkJoinSaltNullsRule extends RelRule<FlinkJoinSaltNullsRule.Confi
                             relBuilder.call(FlinkSqlOperatorTable.RAND_INTEGER, rexBuilder.makeLiteral(128, intType, false)),
                             rexBuilder.makeLiteral(0, intType, false));
 
-        RelNode leftSaltedProject = 
+        RelNode leftSaltedProject =
             relBuilder
                 .push(origLeft)
                 .project(Iterables.concat(relBuilder.fields(), ImmutableList.of(leftSaltExpr)), leftFieldNames, true)
@@ -159,7 +159,7 @@ public class FlinkJoinSaltNullsRule extends RelRule<FlinkJoinSaltNullsRule.Confi
                         }
                 });
 
-        RelNode rightSaltedProject = 
+        RelNode rightSaltedProject =
             relBuilder
                 .push(origRight)
                 .project(Iterables.concat(relBuilder.fields(), ImmutableList.of(rightSaltExpr)), rightFieldNames, true)
@@ -197,7 +197,7 @@ public class FlinkJoinSaltNullsRule extends RelRule<FlinkJoinSaltNullsRule.Confi
                 .push(saltyJoin)
                 .projectExcept(relBuilder.fields(ImmutableList.of(LEFT_SALT_NAME, RIGHT_SALT_NAME)))
                 .build();
-            
+
         call.transformTo(saltyProject);
     }
 
