@@ -184,6 +184,16 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                 LOG.debug("dropping LEFT input {}", rowStringSerializer.asString(element.getValue()));
                 leftInputDroppedNullKeyCount.inc();
                 return;
+            } else if (isEquijoin) {
+                // special optimization for outer joins on a NULL key
+                // we do not need to maintain any state since the join
+                // condition will result in an association failure, so
+                // we will never have associated rows data from the
+                // other side to pass through
+                // RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(leftType);
+                // LOG.info("SERGEI left input optimization {}", rowStringSerializer.asString(element.getValue()));
+                outputNullPaddingForce(element.getValue(), true);
+                return;
             }
         }
         if (isMinibatchEnabled && !isBatchMode()) {
@@ -208,6 +218,14 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                 RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(rightType);
                 LOG.debug("dropping RIGHT input {}", rowStringSerializer.asString(element.getValue()));
                 rightInputDroppedNullKeyCount.inc();
+                return;
+            } else if (isEquijoin) {
+                // special optimization for outer joins on a NULL key
+                // we do not need to maintain any state since the join
+                // condition will result in an association failure, so
+                // we will never have associated rows data from the
+                // other side to pass through
+                outputNullPaddingForce(element.getValue(), false);
                 return;
             }
         }
@@ -515,15 +533,19 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         collector.collect(outRow);
     }
 
-    private void outputNullPadding(RowData row, boolean isLeft) {
-        if (isBatchMode()) {
-            return;
-        }
+    private void outputNullPaddingForce(RowData row, boolean isLeft) {
         if (isLeft) {
             outRow.replace(row, rightNullRow);
         } else {
             outRow.replace(leftNullRow, row);
         }
         collector.collect(outRow);
+    }
+
+    private void outputNullPadding(RowData row, boolean isLeft) {
+        if (isBatchMode()) {
+            return;
+        }
+        outputNullPaddingForce(row, isLeft);
     }
 }
