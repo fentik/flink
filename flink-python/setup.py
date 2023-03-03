@@ -308,7 +308,7 @@ try:
         author='Apache Software Foundation',
         author_email='dev@flink.apache.org',
         python_requires='>=3.6',
-        install_requires=['py4j==0.10.9.3', 'python-dateutil==2.8.0', 'apache-beam==2.38.0',
+        install_requires=['py4j==0.10.9.5', 'python-dateutil==2.8.0', 'apache-beam==2.38.0',
                           'cloudpickle==2.0.0', 'avro-python3>=1.8.1,!=1.9.2,<1.10.0',
                           'pandas>=1.3.0', 'pyarrow>=5.0.0',
                           'pytz>=2018.3', 'numpy>=1.21.4', 'fastavro>=0.21.4,<0.24',
