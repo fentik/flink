@@ -128,6 +128,7 @@ public class DeduplicateFunctionHelper {
                     // We do not emit retraction and update message.
                     // If state cleaning is enabled, we have to emit messages to prevent too early
                     // state eviction of downstream operators.
+                    LOG.info('Testing commit');
                     return;
                 } else {
                     if (generateUpdateBefore) {
