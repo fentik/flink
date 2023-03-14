@@ -60,7 +60,6 @@ public class ProcTimeDeduplicateKeepLastRowFunction
         this.inputIsInsertOnly = inputInsertOnly;
         this.genRecordEqualiser = genRecordEqualiser;
         this.isStateTtlEnabled = stateRetentionTime > 0;
-        
     }
 
     @Override
