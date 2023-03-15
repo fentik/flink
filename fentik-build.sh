@@ -51,6 +51,9 @@ if [ "$1" == "--package" ]; then
     aws s3 cp $temp_dir/flink.tar.gz $S3_PATH_LATEST/
     echo $GIT_SHA | aws s3 cp - $S3_PATH_LATEST/version
     rm -rf $temp_dir
+    # don't print the echo command.
+    set +x
     echo "To use the new binary, update python/scripts/setup_ec2/common.sh with":
     echo "FLINK_BINARY_GIT_SHA=\"$GIT_SHA\""
+    set -x
 fi
