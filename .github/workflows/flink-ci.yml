@@ -28,7 +28,7 @@ jobs:
       -  uses: s4u/maven-settings-action@v2.8.0
          with:
            servers: '[{"id": "rubicon_github", "username": MAVEN_USERNAME, "server-password": MAVEN_PASSWORD}]'
-           mirrors: '[{"id": "repository.jboss.org-unblocker", "mirrorOf": "repository.jboss.org", "url": "http://repository.jboss.org/nexus/content/groups/public/"}, {"id": "conjars-unblocker", "mirrorOf": "apache.snapshots", "url": "http://repository.apache.org/snapshots"}]'
+           mirrors: '[{"id": "repository.jboss.org-unblocker", "name": "", "mirrorOf": "repository.jboss.org", "url": "http://repository.jboss.org/nexus/content/groups/public/"}, {"id": "conjars-unblocker", "name": "", "mirrorOf": "apache.snapshots", "url": "http://repository.apache.org/snapshots"}]'
       - run: |
           ./fentik-build.sh --package
           pushd fentik-docker
