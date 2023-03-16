@@ -369,6 +369,14 @@ public class ExecutionConfigOptions {
                     .defaultValue(false)
                     .withDescription("Use hybrid batch stream mode for backfill");
 
+
+    @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
+	public static final ConfigOption<Boolean> TABLE_EXEC_STATELESS_JOIN_ON_NULL_KEY =
+			key("table.exec.stateless-join-on-null-key")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Use stateless joins on null key");
+
     @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
     public static final ConfigOption<Boolean> TABLE_EXEC_IS_BOUNDED_LATEST =
             key("table.exec.force-bounded-latest")

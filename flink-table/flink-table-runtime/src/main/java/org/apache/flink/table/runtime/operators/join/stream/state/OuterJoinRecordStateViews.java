@@ -38,6 +38,7 @@ import org.apache.flink.runtime.state.VoidNamespaceSerializer;
 import org.apache.flink.runtime.state.KeyedStateBackend;
 import org.apache.flink.runtime.state.KeyedStateFunction;
 import org.apache.flink.table.runtime.generated.JoinCondition;
+import org.apache.flink.table.runtime.operators.join.stream.StreamingPerfOptimizationUtil;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.table.data.utils.JoinedRowData;
 import org.apache.flink.table.runtime.util.RowDataStringSerializer;
@@ -94,13 +95,12 @@ public final class OuterJoinRecordStateViews {
         }
     }
 
-    static void processElements(JoinRecordStateView otherView, Collector<RowData> collect,
+    static void processElements(JoinRecordStateView thisView, JoinRecordStateView otherView, Collector<RowData> collect,
             JoinCondition condition, boolean inputIsLeft, JoinedRowData outRow,
             RowData thisRow, RowData otherNullRow, boolean isAntiJoin,
-            boolean inputRowOnly) throws Exception {
+            boolean inputRowOnly, boolean isEquijoin, boolean isBatchMode, boolean statelessNullKeysEnabled, boolean isOuterJoin) throws Exception {
 
         int rowsMatched = 0;
-
         Iterator<?> recordIter;
         if (otherView instanceof OuterJoinRecordStateView) {
             OuterJoinRecordStateView ov = (OuterJoinRecordStateView) otherView;
@@ -109,6 +109,7 @@ public final class OuterJoinRecordStateViews {
         } else {
             recordIter = otherView.getRecords().iterator();
         }
+        
 
         while (recordIter.hasNext()) {
             RowData otherRow;
@@ -159,6 +160,17 @@ public final class OuterJoinRecordStateViews {
                 }
                 collect.collect(outRow);
             }
+        }
+
+        if (!isAntiJoin && StreamingPerfOptimizationUtil.isEligibleForNullEquijoinOptimization(
+                StreamingPerfOptimizationUtil.isKeyAnyNulls(thisRow),
+                isEquijoin,
+                false, // We are evicting state and transitioning to streaming so set batch_mode to False
+                statelessNullKeysEnabled,
+                true)) {
+            // Retract record from state if it is an outer equijoin on a null key (Reduces operator state we need to maintain)
+            LOG.debug("Performance Optimization - Evicting NULL record from state in outer equijoin");
+            thisView.retractRecord(thisRow);
         }
     }
 
@@ -243,14 +255,15 @@ public final class OuterJoinRecordStateViews {
 
         private void emitState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
                 JoinRecordStateView otherView, JoinCondition condition, boolean isAntiJoin,
-                boolean inputRowOnly, boolean inputIsLeft) throws Exception {
+                boolean inputRowOnly, boolean inputIsLeft, boolean isEquijoin, boolean isOuterJoin, boolean statelessNullKeysEnabled, boolean isBatchMode) throws Exception {
             TupleTypeInfo<Tuple2<RowData, Integer>> valueTypeInfo = new TupleTypeInfo<>(recordType, Types.INT);
             ValueStateDescriptor<Tuple2<RowData, Integer>> recordStateDesc = new ValueStateDescriptor<>(stateName,
                     valueTypeInfo);
 
             JoinedRowData outRow = new JoinedRowData();
             outRow.setRowKind(RowKind.INSERT);
-
+            JoinRecordStateView thisView = this;
+            // LOG.info("Processing emit state workflow (step 1) for {}", recordSerializer.asString(thisRow));
             be.applyToAllKeys(VoidNamespace.INSTANCE,
                     VoidNamespaceSerializer.INSTANCE,
                     recordStateDesc,
@@ -259,12 +272,9 @@ public final class OuterJoinRecordStateViews {
                         public void process(RowData key, ValueState<Tuple2<RowData, Integer>> state) throws Exception {
                             Tuple2<RowData, Integer> record = state.value();
                             RowData thisRow = record.f0;
-
-                            // set current key context for otherView fetch
                             be.setCurrentKey(key);
-
-                            processElements(otherView, collect, condition, inputIsLeft, outRow,
-                                    thisRow, otherNullRow, isAntiJoin, inputRowOnly);
+                            processElements(thisView, otherView, collect, condition, inputIsLeft, outRow,
+                                    thisRow, otherNullRow, isAntiJoin, inputRowOnly, isEquijoin, isOuterJoin, statelessNullKeysEnabled, isBatchMode);
                         }
                     });
         }
@@ -272,15 +282,15 @@ public final class OuterJoinRecordStateViews {
         @Override
         public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
                 JoinRecordStateView otherView, JoinCondition condition, boolean inputRowOnly,
-                boolean inputIsLeft) throws Exception {
-            emitState(be, collect, otherView, condition, false, inputRowOnly, inputIsLeft);
+                boolean inputIsLeft, boolean isEquijoin, boolean isOuterJoin, boolean statelessNullKeysEnabled, boolean isBatchMode) throws Exception {
+            emitState(be, collect, otherView, condition, false, inputRowOnly, inputIsLeft, isEquijoin, isOuterJoin, statelessNullKeysEnabled, isBatchMode);
         }
 
         @Override
         public void emitAntiJoinState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
                 JoinRecordStateView otherView, JoinCondition condition, boolean inputRowOnly,
-                boolean inputIsLeft) throws Exception {
-            emitState(be, collect, otherView, condition, true, inputRowOnly, inputIsLeft);
+                boolean inputIsLeft, boolean isEquijoin, boolean isOuterJoin, boolean statelessNullKeysEnabled, boolean isBatchMode) throws Exception {
+            emitState(be, collect, otherView, condition, true, inputRowOnly, inputIsLeft, isEquijoin, isOuterJoin, statelessNullKeysEnabled, isBatchMode);
         }
     }
 
@@ -359,14 +369,15 @@ public final class OuterJoinRecordStateViews {
 
         private void emitState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
                 JoinRecordStateView otherView, JoinCondition condition, boolean isAntiJoin, boolean inputRowOnly,
-                boolean inputIsLeft) throws Exception {
+                boolean inputIsLeft, boolean isEquijoin, boolean isOuterJoin, boolean statelessNullKeysEnabled, boolean isBatchMode) throws Exception {
             TupleTypeInfo<Tuple2<RowData, Integer>> valueTypeInfo = new TupleTypeInfo<>(recordType, Types.INT);
             MapStateDescriptor<RowData, Tuple2<RowData, Integer>> recordStateDesc = new MapStateDescriptor<>(stateName,
                     uniqueKeyType, valueTypeInfo);
 
             JoinedRowData outRow = new JoinedRowData();
             outRow.setRowKind(RowKind.INSERT);
-
+            JoinRecordStateView thisView = this;
+            
             be.applyToAllKeys(VoidNamespace.INSTANCE,
                     VoidNamespaceSerializer.INSTANCE,
                     recordStateDesc,
@@ -379,8 +390,8 @@ public final class OuterJoinRecordStateViews {
 
                             for (Map.Entry<RowData, Tuple2<RowData, Integer>> entry : state.entries()) {
                                 RowData thisRow = entry.getValue().f0;
-                                processElements(otherView, collect, condition, inputIsLeft, outRow,
-                                        thisRow, otherNullRow, isAntiJoin, inputRowOnly);
+                                processElements(thisView, otherView, collect, condition, inputIsLeft, outRow,
+                                    thisRow, otherNullRow, isAntiJoin, inputRowOnly, isEquijoin, isOuterJoin, statelessNullKeysEnabled, isBatchMode);
                             }
                         }
                     });
@@ -389,15 +400,15 @@ public final class OuterJoinRecordStateViews {
         @Override
         public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
                 JoinRecordStateView otherView, JoinCondition condition, boolean inputRowOnly,
-                boolean inputIsLeft) throws Exception {
-            emitState(be, collect, otherView, condition, false, inputRowOnly, inputIsLeft);
+                boolean inputIsLeft, boolean isEquijoin, boolean isOuterJoin, boolean statelessNullKeysEnabled, boolean isBatchMode) throws Exception {
+            emitState(be, collect, otherView, condition, false, inputRowOnly, inputIsLeft, isEquijoin, isOuterJoin, statelessNullKeysEnabled, isBatchMode);
         }
 
         @Override
         public void emitAntiJoinState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
                 JoinRecordStateView otherView, JoinCondition condition, boolean inputRowOnly,
-                boolean inputIsLeft) throws Exception {
-            emitState(be, collect, otherView, condition, true, inputRowOnly, inputIsLeft);
+                boolean inputIsLeft, boolean isEquijoin, boolean isOuterJoin, boolean statelessNullKeysEnabled, boolean isBatchMode) throws Exception {
+            emitState(be, collect, otherView, condition, true, inputRowOnly, inputIsLeft, isEquijoin, isOuterJoin, statelessNullKeysEnabled, isBatchMode);
         }
     }
 
@@ -517,13 +528,14 @@ public final class OuterJoinRecordStateViews {
 
         private void emitState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
                 JoinRecordStateView otherView, JoinCondition condition, boolean isAntiJoin,
-                boolean inputRowOnly, boolean inputIsLeft) throws Exception {
+                boolean inputRowOnly, boolean inputIsLeft, boolean isEquijoin, boolean isOuterJoin, boolean statelessNullKeysEnabled, boolean isBatchMode) throws Exception {
             TupleTypeInfo<Tuple2<Integer, Integer>> tupleTypeInfo = new TupleTypeInfo<>(Types.INT, Types.INT);
             MapStateDescriptor<RowData, Tuple2<Integer, Integer>> recordStateDesc = new MapStateDescriptor<>(stateName,
                     recordType, tupleTypeInfo);
 
             JoinedRowData outRow = new JoinedRowData();
             outRow.setRowKind(RowKind.INSERT);
+            JoinRecordStateView thisView = this;
 
             be.applyToAllKeys(VoidNamespace.INSTANCE,
                     VoidNamespaceSerializer.INSTANCE,
@@ -538,8 +550,8 @@ public final class OuterJoinRecordStateViews {
                             Iterator<RowData> iterator = getRecords().iterator();
                             while (iterator.hasNext()) {
                                 RowData thisRow = iterator.next();
-                                processElements(otherView, collect, condition, inputIsLeft, outRow,
-                                        thisRow, otherNullRow, isAntiJoin, inputRowOnly);
+                                processElements(thisView, otherView, collect, condition, inputIsLeft, outRow,
+                                        thisRow, otherNullRow, isAntiJoin, inputRowOnly, isEquijoin, isOuterJoin, statelessNullKeysEnabled, isBatchMode);
                             }
                         }
                     });
@@ -549,15 +561,15 @@ public final class OuterJoinRecordStateViews {
         @Override
         public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
                 JoinRecordStateView otherView, JoinCondition condition, boolean inputRowOnly,
-                boolean inputIsLeft) throws Exception {
-            emitState(be, collect, otherView, condition, false, inputRowOnly, inputIsLeft);
+                boolean inputIsLeft, boolean isEquijoin, boolean isOuterJoin, boolean statelessNullKeysEnabled, boolean isBatchMode) throws Exception {
+            emitState(be, collect, otherView, condition, false, inputRowOnly, inputIsLeft, isEquijoin, isOuterJoin, statelessNullKeysEnabled, isBatchMode);
         }
 
         @Override
         public void emitAntiJoinState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
                 JoinRecordStateView otherView, JoinCondition condition, boolean inputRowOnly,
-                boolean inputIsLeft) throws Exception {
-            emitState(be, collect, otherView, condition, true, inputRowOnly, inputIsLeft);
+                boolean inputIsLeft, boolean isEquijoin, boolean isOuterJoin, boolean statelessNullKeysEnabled, boolean isBatchMode) throws Exception {
+            emitState(be, collect, otherView, condition, true, inputRowOnly, inputIsLeft, isEquijoin, isOuterJoin, statelessNullKeysEnabled, isBatchMode);
         }
     }
 
