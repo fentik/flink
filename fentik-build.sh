@@ -13,13 +13,6 @@ LIB_DIR="$FLINK_DIR/lib/"
 OPT_DIR="$FLINK_DIR/opt/"
 GIT_SHA=$(git log -n 1 --format="%H" .)
 
-# TODO(ziga): Remove debug code.
-echo "Debug start"
-echo "$MAVEN_USERNAME"
-echo "$MAVEN_PASSWORD"
-cat ~/.m2/settings.xml
-echo "Debug end"
-
 # -U updates snapshot dependencies. This is required to make sure we get the latest snapshot release version
 # for presto-hive that we now maintain in our repo.
 MVN_INSTALL="./mvnw -U install -DskipTests -Dfast"
