@@ -50,16 +50,33 @@ under the License.
 	</scm>
 
 	<repositories>
-		<repository>
-			<id>repository.jboss.org</id>
-			<url>https://repository.jboss.org/nexus/content/groups/public/</url>
-			<snapshots>
-				<enabled>false</enabled>
-			</snapshots>
-			<releases>
-				<enabled>false</enabled>
-			</releases>
-		</repository>
+	   <repository>
+ 		  <id>rubicon_github</id>
+ 		  <name>Rubicon Apache Maven repo</name>
+ 		  <url>https://maven.pkg.github.com/fentik/presto</url>
+ 		<snapshots>
+			<enabled>true</enabled>
+		</snapshots>
+		<releases>
+		  <enabled>false</enabled>
+		</releases>
+	   </repository>
+	   <repository>
+	     <id>oss.sonatype.org-snapshot</id>
+	     <url>http://oss.sonatype.org/content/repositories/snapshots</url>
+	     <releases><enabled>false</enabled></releases>
+	     <snapshots><enabled>true</enabled></snapshots>
+	   </repository>
+	   <repository>
+	     <id>repository.jboss.org</id>
+	     <url>http://repository.jboss.org/nexus/content/groups/public/</url>
+	     <snapshots>
+	       <enabled>false</enabled>
+	     </snapshots>
+	     <releases>
+	       <enabled>false</enabled>
+	     </releases>
+	   </repository>
 	</repositories>
 
 	<modules>

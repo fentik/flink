@@ -35,20 +35,6 @@ under the License.
 		<presto.version>0.272.2-SNAPSHOT</presto.version>
 	</properties>
 
-	<repositories>
- 		<repository>
- 		  <id>rubicon_github</id>
- 		  <name>Rubicon Apache Maven repo</name>
- 		  <url>https://maven.pkg.github.com/fentik/presto</url>
- 		<snapshots>
-			<enabled>true</enabled>
-		</snapshots>
-		<releases>
-            <enabled>false</enabled>
-        </releases>
-		</repository>
-	</repositories>
-
 	<dependencies>
 
 		<!-- Flink's file system abstraction (compiled against, not bundled) -->
