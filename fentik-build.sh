@@ -15,8 +15,8 @@ GIT_SHA=$(git log -n 1 --format="%H" .)
 
 # TODO(ziga): Remove debug code.
 echo "Debug start"
-echo "$GITHUB_ACTOR"
-echo "$GITHUB_TOKEN"
+echo "$MAVEN_USERNAME"
+echo "$MAVEN_PASSWORD"
 echo "Debug end"
 
 # -U updates snapshot dependencies. This is required to make sure we get the latest snapshot release version
