@@ -22,7 +22,8 @@ echo "Debug end"
 
 # -U updates snapshot dependencies. This is required to make sure we get the latest snapshot release version
 # for presto-hive that we now maintain in our repo.
-MVN_INSTALL="./mvnw -U install -DskipTests -Dfast -s maven-unblock-http-repos.xml"
+#MVN_INSTALL="./mvnw -U install -DskipTests -Dfast -s maven-unblock-http-repos.xml"
+MVN_INSTALL="./mvnw -U install -DskipTests -Dfast"
 $MVN_INSTALL -f fentik-udf
 $MVN_INSTALL -f fentik-flink-sql-runner
 $MVN_INSTALL -f fentik-rescale-savepoint
