@@ -22,6 +22,8 @@ jobs:
           distribution: 'temurin'
           java-version: '11'
           cache: 'maven'
+	  server-username: 'akhilg'
+	  server-password: ${{ secrets.PRESTO_MAVEN_REPO }}
 
       - run: |
           ./fentik-build.sh --package
