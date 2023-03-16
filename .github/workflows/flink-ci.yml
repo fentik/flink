@@ -23,8 +23,8 @@ jobs:
           java-version: '11'
           cache: 'maven'
           server-id: rubicon_github
-          server-username: sergeitsar
-          server-password: ${{ secrets.PRESTO_MAVEN_REPO }}
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
 
       - run: |
           ./fentik-build.sh --package
@@ -35,6 +35,8 @@ jobs:
            AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
            AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
            AWS_EC2_METADATA_DISABLED: true
+           GITHUB_TOKEN: ${{ secrets.PRESTO_MAVEN_REPO }}
+           GITHUB_ACTOR: sergeitsar
 
       - uses: act10ns/slack@v1
         with:
