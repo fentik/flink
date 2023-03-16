@@ -208,7 +208,8 @@ object FlinkStreamRuleSets {
     // push project through a Union
     CoreRules.PROJECT_SET_OP_TRANSPOSE,
     // push a projection to the child of a WindowTableFunctionScan
-    ProjectWindowTableFunctionTransposeRule.INSTANCE
+    ProjectWindowTableFunctionTransposeRule.INSTANCE,
+    CoreRules.PROJECT_WINDOW_TRANSPOSE
   )
 
   val JOIN_REORDER_PREPARE_RULES: RuleSet = RuleSets.ofList(
