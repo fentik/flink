@@ -22,9 +22,9 @@ jobs:
           distribution: 'temurin'
           java-version: '11'
           cache: 'maven'
-	  server-id: rubicon_github
-	  server-username: 'akhilg'
-	  server-password: ${{ secrets.PRESTO_MAVEN_REPO }}
+          server-id: rubicon_github
+          server-username: akhilg
+          server-password: ${{ secrets.PRESTO_MAVEN_REPO }}
 
       - run: |
           ./fentik-build.sh --package
