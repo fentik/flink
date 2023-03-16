@@ -13,7 +13,9 @@ LIB_DIR="$FLINK_DIR/lib/"
 OPT_DIR="$FLINK_DIR/opt/"
 GIT_SHA=$(git log -n 1 --format="%H" .)
 
-MVN_INSTALL="./mvnw install -DskipTests -Dfast -s maven-unblock-http-repos.xml"
+# -U updates snapshot dependencies. This is required to make sure we get the latest snapshot release version
+# for presto-hive that we now maintain in our repo.
+MVN_INSTALL="./mvnw -U install -DskipTests -Dfast -s maven-unblock-http-repos.xml"
 $MVN_INSTALL -f fentik-udf
 $MVN_INSTALL -f fentik-flink-sql-runner
 $MVN_INSTALL -f fentik-rescale-savepoint
