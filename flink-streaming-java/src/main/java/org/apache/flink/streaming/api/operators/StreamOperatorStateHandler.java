@@ -198,6 +198,20 @@ public class StreamOperatorStateHandler {
             StateSnapshotContextSynchronousImpl snapshotContext,
             boolean isUsingCustomRawKeyedState)
             throws CheckpointException {
+        // XXX(sergei): in the latest pipelines, we started to see savepoint/checkpoint failures
+        // due to rate limiting from S3; our suspicion is that there's a thundering herd problem
+        // at the start of a checkpoint that overwhelms S3, so we stagger operator snapshot starts
+        // across a 60 second boundary to prevent all the operators from issuing a rush of expensive
+        // operations at the start of a checkpoint
+        final int max_delay_millis = 60 * 1000;
+        int sleep_millis = (new java.util.Random()).nextInt(max_delay_millis);
+        LOG.info("snapShotstate({}) delaying for {} millis", operatorName, sleep_millis);
+        try {
+            Thread.sleep(sleep_millis);
+        } catch (Exception e) {
+            LOG.info("snapShotstate({}) delaying for {} millis SLEEP INTERRUPTED", operatorName, sleep_millis);
+        }
+
         try {
             if (timeServiceManager.isPresent()) {
                 checkState(
