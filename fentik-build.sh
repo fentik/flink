@@ -17,6 +17,7 @@ GIT_SHA=$(git log -n 1 --format="%H" .)
 echo "Debug start"
 echo "$MAVEN_USERNAME"
 echo "$MAVEN_PASSWORD"
+cat ~/.m2/settings.xml
 echo "Debug end"
 
 # -U updates snapshot dependencies. This is required to make sure we get the latest snapshot release version
