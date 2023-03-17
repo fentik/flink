@@ -374,7 +374,7 @@ public class ExecutionConfigOptions {
 	public static final ConfigOption<Boolean> TABLE_EXEC_STATELESS_JOIN_ON_NULL_KEY =
 			key("table.exec.stateless-join-on-null-key")
                     .booleanType()
-                    .defaultValue(false)
+                    .defaultValue(true)
                     .withDescription("Use stateless joins on null key");
 
     @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)

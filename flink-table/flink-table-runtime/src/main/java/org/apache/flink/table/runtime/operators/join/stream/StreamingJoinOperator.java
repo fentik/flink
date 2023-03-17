@@ -73,9 +73,14 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
     private transient Counter rightInputNullKeyCount;
     private transient Counter leftInputDroppedNullKeyCount;
     private transient Counter rightInputDroppedNullKeyCount;
+    private transient Counter leftInputNullOuterEquiJoinOptimizationCount;
+    private transient Counter rightInputNullOuterEquiJoinOptimizationCount;
 
     private final boolean statelessNullKeysEnabled;
     private boolean isEquijoin;
+
+    private final RowDataStringSerializer leftInputSerializer;
+    private final RowDataStringSerializer rightInputSerializer;
 
     public StreamingJoinOperator(
             InternalTypeInfo<RowData> leftType,
@@ -107,6 +112,8 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         this.maxMinibatchSize = maxMinibatchSize;
         this.isEquijoin = isEquijoin;
         this.statelessNullKeysEnabled = statelessNullKeysEnabled;
+        this.leftInputSerializer = new RowDataStringSerializer(leftType);
+        this.rightInputSerializer = new RowDataStringSerializer(rightType);
     }
 
     @Override
@@ -123,6 +130,9 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         this.rightInputNullKeyCount = getRuntimeContext().getMetricGroup().counter("join.rightInputNullKeyCount");
         this.leftInputDroppedNullKeyCount = getRuntimeContext().getMetricGroup().counter("join.leftInputDroppedNullKeyCount");
         this.rightInputDroppedNullKeyCount = getRuntimeContext().getMetricGroup().counter("join.rightInputDroppedNullKeyCount");
+        this.leftInputNullOuterEquiJoinOptimizationCount = getRuntimeContext().getMetricGroup().counter("join.leftInputNullOuterEquiJoinOptimizationCount");
+        this.rightInputNullOuterEquiJoinOptimizationCount = getRuntimeContext().getMetricGroup().counter("join.rightInputNullOuterEquiJoinOptimizationCount");
+        
 
         // initialize states
         if (leftIsOuter) {
@@ -172,12 +182,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
 
     private boolean isKeyAnyNulls() {
         RowData key = (RowData) getCurrentKey();
-        for (int i = 0; i < key.getArity(); i++) {
-            if (key.isNullAt(i)) {
-                return true;
-            }
-        }
-        return false;
+        return StreamingPerfOptimizationUtil.isKeyAnyNulls(key);
     }
 
     @Override
@@ -188,11 +193,10 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
             if (!leftIsOuter) {
                 // performance optimization: if the input key is null and it's
                 // not an outer side, we can simply ignore the input row
-                RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(leftType);
-                LOG.debug("Performance Optimization - Dropping left input {}", rowStringSerializer.asString(element.getValue()));
+                LOG.debug("Performance Optimization - Dropping left input={}", leftInputSerializer.asString(element.getValue()));
                 leftInputDroppedNullKeyCount.inc();
                 return;
-        } else if (StreamingPerfOptimizationUtil.isEligibleForNullEquijoinOptimization(
+            } else if (StreamingPerfOptimizationUtil.isEligibleForNullEquijoinOptimization(
                     true,
                     isEquijoin,
                     isBatchMode(),
@@ -203,8 +207,8 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                 // condition will result in an association failure, so
                 // we will never have associated rows data from the
                 // other side to pass through
-                RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(leftType);
-                LOG.debug("Performance Optimization - Left outer join on null key {}", rowStringSerializer.asString(element.getValue()));
+                LOG.debug("Performance Optimization - Left outer join on null key, input={}", leftInputSerializer.asString(element.getValue()));
+                leftInputNullOuterEquiJoinOptimizationCount.inc();
                 outputNullPaddingForce(element.getValue(), true);
                 return;
             }
@@ -228,8 +232,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
             if (!rightIsOuter) {
                 // performance optimization: if the input key is null and it's
                 // not an outer side, we can simply ignore the input row
-                RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(rightType);
-                LOG.debug("Performance Optimization - Dropping RIGHT input {}", rowStringSerializer.asString(element.getValue()));
+                LOG.debug("Performance Optimization - Dropping RIGHT input={}", rightInputSerializer.asString(element.getValue()));
                 rightInputDroppedNullKeyCount.inc();
                 return;
             } else if (StreamingPerfOptimizationUtil.isEligibleForNullEquijoinOptimization(
@@ -243,8 +246,8 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                 // condition will result in an association failure, so
                 // we will never have associated rows data from the
                 // other side to pass through
-                RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(rightType);
-                LOG.debug("Performance Optimization - Right outer join on null key {}", rowStringSerializer.asString(element.getValue()));
+                LOG.debug("Performance Optimization - Right outer join on null key, input={}", rightInputSerializer.asString(element.getValue()));
+                rightInputNullOuterEquiJoinOptimizationCount.inc();
                 outputNullPaddingForce(element.getValue(), false);
                 return;
             }
@@ -307,23 +310,23 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         LOG.info("{} emit and switch to streaming leftIsOuter: {}, rightIsOuter: {}", getPrintableName(), leftIsOuter, rightIsOuter);
         if (leftIsOuter) {
             leftRecordStateView.emitCompleteState(getKeyedStateBackend(), this.collector,
-                    rightRecordStateView, joinCondition, false, true, isEquijoin, true, statelessNullKeysEnabled, isBatchMode());
+                    rightRecordStateView, joinCondition, false, true, isEquijoin, true, statelessNullKeysEnabled);
             if (rightIsOuter) {
                 // FULL JOIN condition, we want to emit the following
                 // leftState -> emitComplete
                 // rightState -> emitAntiJoin (everything in right that doesn't match left)
                 OuterJoinRecordStateView rightView = (OuterJoinRecordStateView) rightRecordStateView;
                 rightView.emitAntiJoinState(getKeyedStateBackend(), this.collector,
-                        leftRecordStateView, joinCondition, false, false /* inputIsLeft */, isEquijoin, true, statelessNullKeysEnabled, isBatchMode());
+                        leftRecordStateView, joinCondition, false, false /* inputIsLeft */, isEquijoin, true, statelessNullKeysEnabled);
             }
         } else if (rightIsOuter) {
             // RIGHT OUTER JOIN
             rightRecordStateView.emitCompleteState(getKeyedStateBackend(), this.collector,
-                    leftRecordStateView, joinCondition, false, false, isEquijoin, true, statelessNullKeysEnabled, isBatchMode());
+                    leftRecordStateView, joinCondition, false, false, isEquijoin, true, statelessNullKeysEnabled);
         } else {
             // standard inner join
             leftRecordStateView.emitCompleteState(getKeyedStateBackend(), this.collector,
-                    rightRecordStateView, joinCondition, false, true, isEquijoin, false, statelessNullKeysEnabled, isBatchMode());
+                    rightRecordStateView, joinCondition, false, true, isEquijoin, false, statelessNullKeysEnabled);
         }
 
         setStreamMode(true);

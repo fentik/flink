@@ -134,7 +134,7 @@ public final class JoinRecordStateViews {
         @Override
         public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
                 JoinRecordStateView otherView, JoinCondition condition, boolean leftRowOnly,
-                boolean inputIsLeft, boolean isEquijoin, boolean isOuterJoin, boolean statelessNullKeysEnabled, boolean isBatchMode) throws Exception {
+                boolean inputIsLeft, boolean isEquijoin, boolean isOuterJoin, boolean statelessNullKeysEnabled) throws Exception {
             emitCompleteState(be, collect, otherView, condition);
         }
 
@@ -221,7 +221,7 @@ public final class JoinRecordStateViews {
         @Override
         public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
                 JoinRecordStateView otherView, JoinCondition condition, boolean leftRowOnly,
-                boolean inputIsLeft, boolean isEquijoin, boolean isOuterJoin, boolean statelessNullKeysEnabled, boolean isBatchMode) throws Exception {
+                boolean inputIsLeft, boolean isEquijoin, boolean isOuterJoin, boolean statelessNullKeysEnabled) throws Exception {
             emitCompleteState(be, collect, otherView, condition);
         }
 
@@ -341,7 +341,7 @@ public final class JoinRecordStateViews {
         @Override
         public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
                 JoinRecordStateView otherView, JoinCondition condition, boolean leftRowOnly,
-                boolean inputIsLeft, boolean isEquijoin, boolean isOuterJoin, boolean statelessNullKeysEnabled, boolean isBatchMode) throws Exception {
+                boolean inputIsLeft, boolean isEquijoin, boolean isOuterJoin, boolean statelessNullKeysEnabled) throws Exception {
             emitCompleteState(be, collect, otherView, condition);
         }
 
