@@ -169,7 +169,7 @@ public final class OuterJoinRecordStateViews {
             }
         }
 
-        if (!isAntiJoin && StreamingPerfOptimizationUtil.isEligibleForNullEquijoinOptimization(
+        if (StreamingPerfOptimizationUtil.isEligibleForNullEquijoinOptimization(
                 isKeyAnyNulls,
                 isEquijoin,
                 false, // We are evicting state and transitioning to streaming so set batch_mode to False
