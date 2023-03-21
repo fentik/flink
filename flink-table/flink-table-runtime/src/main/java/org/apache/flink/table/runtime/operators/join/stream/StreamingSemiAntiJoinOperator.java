@@ -51,6 +51,7 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
     // right join state
     private transient JoinRecordStateView rightRecordStateView;
     private transient MiniBatchJoinBuffer rightRecordStateBuffer;
+    private static final boolean statelessNullKeysEnabled = false;
 
     public StreamingSemiAntiJoinOperator(
             boolean isAntiJoin,
@@ -121,11 +122,11 @@ public class StreamingSemiAntiJoinOperator extends AbstractStreamingJoinOperator
         if (isAntiJoin) {
             // Left Anti Join
             leftRecordStateView.emitAntiJoinState(getKeyedStateBackend(), this.collector,
-                rightRecordStateView, joinCondition, true, true);
+                rightRecordStateView, joinCondition, true, true, false, false, statelessNullKeysEnabled);
         } else {
             // Left Semi Join
             leftRecordStateView.emitCompleteState(getKeyedStateBackend(), this.collector,
-                rightRecordStateView, joinCondition, true, true);
+                rightRecordStateView, joinCondition, true, true, false, false, statelessNullKeysEnabled);
         }
         setStreamMode(true);
     }
