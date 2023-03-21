@@ -196,6 +196,7 @@ public class StreamExecJoin extends ExecNodeBase<RowData>
                             maxMinibatchSize);
 
         } else {
+            final boolean statelessNullKeysEnabled = config.get(ExecutionConfigOptions.TABLE_EXEC_STATELESS_JOIN_ON_NULL_KEY);
             boolean leftIsOuter = joinType == FlinkJoinType.LEFT || joinType == FlinkJoinType.FULL;
             boolean rightIsOuter =
                     joinType == FlinkJoinType.RIGHT || joinType == FlinkJoinType.FULL;
@@ -212,8 +213,9 @@ public class StreamExecJoin extends ExecNodeBase<RowData>
                             minRetentionTime,
                             isBatchBackfillEnabled,
                             isMinibatchEnabled,
-                            maxMinibatchSize);
-
+                            maxMinibatchSize,
+                            joinSpec.getNonEquiCondition().isEmpty(),
+                            statelessNullKeysEnabled);
         }
 
         final RowType returnType = (RowType) getOutputType();

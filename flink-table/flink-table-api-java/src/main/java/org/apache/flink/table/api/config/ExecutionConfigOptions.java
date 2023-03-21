@@ -358,7 +358,6 @@ public class ExecutionConfigOptions {
                                     + "MiniBatch is an optimization to buffer input records to reduce state access. "
                                     + "MiniBatch is triggered with the allowed latency interval and when the maximum number of buffered records reached. ");
 
-
     // ------------------------------------------------------------------------
     // Backfill Exec Options
     // ------------------------------------------------------------------------
@@ -368,6 +367,13 @@ public class ExecutionConfigOptions {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Use hybrid batch stream mode for backfill");
+
+    @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
+    public static final ConfigOption<Boolean> TABLE_EXEC_STATELESS_JOIN_ON_NULL_KEY =
+            key("table.exec.stateless-join-on-null-key")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription("Use stateless joins on null key");
 
     @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
     public static final ConfigOption<Boolean> TABLE_EXEC_IS_BOUNDED_LATEST =
@@ -382,7 +388,6 @@ public class ExecutionConfigOptions {
                     .booleanType()
                     .defaultValue(true)
                     .withDescription("Use DedupSinkUpsertMaterializer variant");
-
 
     @Documentation.TableOption(execMode = Documentation.ExecMode.STREAMING)
     public static final ConfigOption<Duration> TABLE_EXEC_MINIBATCH_ALLOW_LATENCY =

@@ -38,6 +38,7 @@ import org.apache.flink.table.runtime.generated.JoinCondition;
 import org.apache.flink.table.data.utils.JoinedRowData;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.table.data.util.RowDataUtil;
+import org.apache.flink.table.runtime.operators.join.stream.StreamingPerfOptimizationUtil;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -133,7 +134,7 @@ public final class JoinRecordStateViews {
         @Override
         public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
                 JoinRecordStateView otherView, JoinCondition condition, boolean leftRowOnly,
-                boolean inputIsLeft) throws Exception {
+                boolean inputIsLeft, boolean isEquijoin, boolean isOuterJoin, boolean statelessNullKeysEnabled) throws Exception {
             emitCompleteState(be, collect, otherView, condition);
         }
 
@@ -220,7 +221,7 @@ public final class JoinRecordStateViews {
         @Override
         public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
                 JoinRecordStateView otherView, JoinCondition condition, boolean leftRowOnly,
-                boolean inputIsLeft) throws Exception {
+                boolean inputIsLeft, boolean isEquijoin, boolean isOuterJoin, boolean statelessNullKeysEnabled) throws Exception {
             emitCompleteState(be, collect, otherView, condition);
         }
 
@@ -340,7 +341,7 @@ public final class JoinRecordStateViews {
         @Override
         public void emitCompleteState(KeyedStateBackend<RowData> be, Collector<RowData> collect,
                 JoinRecordStateView otherView, JoinCondition condition, boolean leftRowOnly,
-                boolean inputIsLeft) throws Exception {
+                boolean inputIsLeft, boolean isEquijoin, boolean isOuterJoin, boolean statelessNullKeysEnabled) throws Exception {
             emitCompleteState(be, collect, otherView, condition);
         }
 
