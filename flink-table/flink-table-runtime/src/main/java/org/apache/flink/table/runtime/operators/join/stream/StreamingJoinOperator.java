@@ -561,6 +561,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         } else {
             outRow.replace(leftNullRow, row);
         }
+        outRow.setRowKind(row.getRowKind());
         collector.collect(outRow);
     }
 
