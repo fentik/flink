@@ -26,6 +26,7 @@ import org.apache.flink.api.common.state.KeyedStateStore;
 import org.apache.flink.api.common.state.State;
 import org.apache.flink.api.common.state.StateDescriptor;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.core.fs.CloseableRegistry;
 import org.apache.flink.runtime.checkpoint.CheckpointException;
@@ -51,6 +52,7 @@ import org.apache.flink.runtime.state.StateInitializationContextImpl;
 import org.apache.flink.runtime.state.StatePartitionStreamProvider;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.runtime.state.StateSnapshotContextSynchronousImpl;
+import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.util.CloseableIterable;
 import org.apache.flink.util.IOUtils;
 
@@ -66,6 +68,8 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.Random;
+import java.time.Duration;
 
 import static org.apache.flink.util.Preconditions.checkState;
 
@@ -85,10 +89,12 @@ public class StreamOperatorStateHandler {
     @Nullable private final DefaultKeyedStateStore keyedStateStore;
     private final OperatorStateBackend operatorStateBackend;
     private final StreamOperatorStateContext context;
+    private final Configuration config;
 
     public StreamOperatorStateHandler(
             StreamOperatorStateContext context,
             ExecutionConfig executionConfig,
+            Configuration config,
             CloseableRegistry closeableRegistry) {
         this.context = context;
         operatorStateBackend = context.operatorStateBackend();
@@ -100,6 +106,7 @@ public class StreamOperatorStateHandler {
         } else {
             keyedStateStore = null;
         }
+        this.config = config;
     }
 
     public void initializeOperatorState(CheckpointedStreamOperator streamOperator)
@@ -198,18 +205,20 @@ public class StreamOperatorStateHandler {
             StateSnapshotContextSynchronousImpl snapshotContext,
             boolean isUsingCustomRawKeyedState)
             throws CheckpointException {
-        // XXX(sergei): in the latest pipelines, we started to see savepoint/checkpoint failures
-        // due to rate limiting from S3; our suspicion is that there's a thundering herd problem
-        // at the start of a checkpoint that overwhelms S3, so we stagger operator snapshot starts
-        // across a 60 second boundary to prevent all the operators from issuing a rush of expensive
-        // operations at the start of a checkpoint
-        final int max_delay_millis = 60 * 1000;
-        int sleep_millis = (new java.util.Random()).nextInt(max_delay_millis);
-        LOG.info("snapShotstate({}) delaying for {} millis", operatorName, sleep_millis);
-        try {
-            Thread.sleep(sleep_millis);
-        } catch (Exception e) {
-            LOG.info("snapShotstate({}) delaying for {} millis SLEEP INTERRUPTED", operatorName, sleep_millis);
+
+        // XXX(sergei): Introduce jitter into operator checkpoint/savepoint starts to avoid hitting
+        // S3 rate limits (with a large DAG, we can exceed 2,500 PUT req/s if Amazon's
+        // auto-partitioning isn't configured properly for our S3 key space).
+        final Duration initialJitter = config.get(
+                ExecutionCheckpointingOptions.CHECKPOINTING_INITIAL_JITTER);
+        if (initialJitter.getSeconds() > 0) {
+            final int sleep_ms = (new Random()).nextInt((int)initialJitter.getSeconds() * 1000);
+            LOG.info("snapshotState({}) delaying for {} ms", operatorName, sleep_ms);
+            try {
+                Thread.sleep(sleep_ms);
+            } catch (Exception e) {
+                LOG.info("snapshotState({}) delaying for {} ms SLEEP INTERRUPTED", operatorName, sleep_ms);
+            }
         }
 
         try {

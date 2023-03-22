@@ -51,6 +51,15 @@ public class ExecutionCheckpointingOptions {
                             "Prevent hybrid batch stream job from exiting on data complete and "
                                     + "hold for a savepoint event, then exit");
 
+    public static final ConfigOption<Duration> CHECKPOINTING_INITIAL_JITTER =
+            ConfigOptions.key("execution.checkpointing.initial-jitter")
+                    .durationType()
+                    .defaultValue(Duration.ofSeconds(0))
+                    .withDescription(
+                            "Delay checkpointing start for each operator by a random duration "
+                                    + "up to this value.  Used to avoid exceeding rate limits on "
+                                    + "S3.");
+
 
     public static final ConfigOption<Duration> CHECKPOINTING_TIMEOUT =
             ConfigOptions.key("execution.checkpointing.timeout")

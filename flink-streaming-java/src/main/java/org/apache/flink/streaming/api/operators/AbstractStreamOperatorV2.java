@@ -226,7 +226,8 @@ public abstract class AbstractStreamOperatorV2<OUT>
                                 runtimeContext.getUserCodeClassLoader()),
                         isUsingCustomRawKeyedState());
 
-        stateHandler = new StreamOperatorStateHandler(context, getExecutionConfig(), cancelables);
+        stateHandler = new StreamOperatorStateHandler(
+                context, getExecutionConfig(), runtimeContext.getTaskManagerRuntimeInfo().getConfiguration(), cancelables);
         timeServiceManager = context.internalTimerServiceManager();
         stateHandler.initializeOperatorState(this);
     }

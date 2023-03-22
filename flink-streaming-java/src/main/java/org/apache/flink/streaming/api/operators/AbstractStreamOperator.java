@@ -287,7 +287,10 @@ public abstract class AbstractStreamOperator<OUT>
 
         stateHandler =
                 new StreamOperatorStateHandler(
-                        context, getExecutionConfig(), streamTaskCloseableRegistry);
+                        context,
+                        getExecutionConfig(),
+                        runtimeContext.getTaskManagerRuntimeInfo().getConfiguration(),
+                        streamTaskCloseableRegistry);
         timeServiceManager = context.internalTimerServiceManager();
         stateHandler.initializeOperatorState(this);
         runtimeContext.setKeyedStateStore(stateHandler.getKeyedStateStore().orElse(null));
