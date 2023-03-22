@@ -280,7 +280,7 @@ public abstract class AbstractStreamOperator<OUT>
                 new StreamOperatorStateHandler(
                         context,
                         getExecutionConfig(),
-                        runtimeContext.getTaskManagerRuntimeInfo().getConfiguration(),
+                        containingTask.getConfiguration().getConfiguration(),
                         streamTaskCloseableRegistry);
         timeServiceManager = context.internalTimerServiceManager();
         stateHandler.initializeOperatorState(this);

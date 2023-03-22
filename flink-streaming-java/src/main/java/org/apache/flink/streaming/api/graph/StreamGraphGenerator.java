@@ -315,6 +315,8 @@ public class StreamGraphGenerator {
                         ExecutionCheckpointingOptions.ENABLE_CHECKPOINTS_AFTER_TASKS_FINISH));
         streamGraph.setHoldBatchForSavepoint(
                 configuration.get(ExecutionCheckpointingOptions.HOLD_BATCH_FOR_SAVEPOINT));
+        streamGraph.setCheckpointInitialJitter(
+                configuration.get(ExecutionCheckpointingOptions.CHECKPOINTING_INITIAL_JITTER));
         streamGraph.setPerOperatorParallelism(
                 configuration.get(ExecutionCheckpointingOptions.PER_OPERATOR_PARALLELISM));
         shouldExecuteInBatchMode = shouldExecuteInBatchMode();
