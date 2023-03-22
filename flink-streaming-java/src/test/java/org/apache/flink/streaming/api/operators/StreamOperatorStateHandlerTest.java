@@ -23,6 +23,7 @@ import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.typeutils.base.IntSerializer;
 import org.apache.flink.api.common.typeutils.base.LongSerializer;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.CloseableRegistry;
 import org.apache.flink.runtime.checkpoint.CheckpointException;
 import org.apache.flink.runtime.checkpoint.CheckpointOptions;
@@ -116,9 +117,10 @@ public class StreamOperatorStateHandlerTest {
                             new InterceptingOperatorMetricGroup(),
                             1.0,
                             false);
+            Configuration config = new Configuration();
             StreamOperatorStateHandler stateHandler =
                     new StreamOperatorStateHandler(
-                            stateContext, new ExecutionConfig(), closeableRegistry);
+                            stateContext, new ExecutionConfig(), config, closeableRegistry);
 
             final String keyedStateField = "keyedStateField";
             final String operatorStateField = "operatorStateField";
