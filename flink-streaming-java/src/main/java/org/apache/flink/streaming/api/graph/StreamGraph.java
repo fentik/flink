@@ -70,6 +70,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -112,6 +113,7 @@ public class StreamGraph implements Pipeline {
 
     private boolean enableCheckpointsAfterTasksFinish;
     private boolean holdBatchForSavepoint;
+    private Duration checkpointInitialJitter;
 
 
     /** Flag to indicate whether to put all vertices into the same slot sharing group by default. */
@@ -308,6 +310,14 @@ public class StreamGraph implements Pipeline {
 
     public void setHoldBatchForSavepoint(boolean holdBatchForSavepoint) {
         this.holdBatchForSavepoint = holdBatchForSavepoint;
+    }
+
+    public Duration getCheckpointInitialJitter() {
+        return checkpointInitialJitter;
+    }
+
+    public void setCheckpointInitialJitter(Duration checkpointInitialJitter) {
+        this.checkpointInitialJitter = checkpointInitialJitter;
     }
 
     public void setPerOperatorParallelism(Map<String, Integer> perOperatorParallelism) {
