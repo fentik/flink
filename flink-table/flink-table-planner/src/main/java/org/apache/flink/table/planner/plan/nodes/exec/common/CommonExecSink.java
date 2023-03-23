@@ -538,7 +538,8 @@ public abstract class CommonExecSink extends ExecNodeBase<Object>
                                 config),
                         operator,
                         inputTransform.getOutputType(),
-                        sinkParallelism);
+                        sinkParallelism,
+			sinkParallelismConfigured);
         materializeTransform.setStateKeySelector(keySelector);
         materializeTransform.setStateKeyType(keySelector.getProducedType());
         return materializeTransform;

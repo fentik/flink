@@ -37,6 +37,8 @@ import org.apache.calcite.tools.RelBuilderFactory;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.type.BasicSqlType;
 import org.apache.flink.table.planner.functions.sql.FlinkSqlOperatorTable;
+import org.immutables.value.Value;
+
 
 import java.util.ArrayList;
 import java.util.List;
@@ -119,7 +121,7 @@ import com.google.common.collect.Iterables;
  *             + IF(b IS NULL, 0, HASH_CODE(b))
  *             + IF(c IS NULL, 0, HASH_CODE(c))), 0) AS __rubisalt_right]
  */
-
+@Value.Enclosing
 public class FlinkJoinSaltNullsRule extends RelRule<FlinkJoinSaltNullsRule.Config>
         implements TransformationRule {
     private static final Logger LOG = LoggerFactory.getLogger(FlinkJoinSaltNullsRule.class);
@@ -321,8 +323,13 @@ public class FlinkJoinSaltNullsRule extends RelRule<FlinkJoinSaltNullsRule.Confi
     }
 
     /** Rule configuration. */
+    @Value.Immutable(singleton = false)
     public interface Config extends RelRule.Config {
-        Config DEFAULT = EMPTY.as(Config.class).withOperandFor(LogicalJoin.class);
+        Config DEFAULT =
+                ImmutableFlinkJoinSaltNullsRule.Config.builder()
+                        .build()
+                        .as(Config.class)
+                        .withOperandFor(LogicalJoin.class);
 
         @Override
         default FlinkJoinSaltNullsRule toRule() {
