@@ -866,8 +866,6 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
                 terminationConditions.add(partitionWriter.getAllDataProcessedFuture());
             }
 
-            terminationConditions.add(finalCheckpointCompleted);
-
             if (waitForFinalSavepointCompleted != null) {
                 terminationConditions.add(waitForFinalSavepointCompleted);
             } else {
