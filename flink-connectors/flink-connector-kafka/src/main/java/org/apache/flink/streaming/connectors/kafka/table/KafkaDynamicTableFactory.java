@@ -32,6 +32,7 @@ import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
 import org.apache.flink.streaming.connectors.kafka.internals.KafkaTopicPartition;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptionsUtil.BoundedOptions;
+import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.format.DecodingFormat;
@@ -214,6 +215,16 @@ public class KafkaDynamicTableFactory
         final int[] valueProjection = createValueFormatProjection(tableOptions, physicalDataType);
 
         final String keyPrefix = tableOptions.getOptional(KEY_FIELDS_PREFIX).orElse(null);
+
+
+       final boolean isBoundedLatest =
+                context.getConfiguration().get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL)
+                        || context.getConfiguration()
+                                .get(ExecutionConfigOptions.TABLE_EXEC_IS_BOUNDED_LATEST);
+
+        if (isBoundedLatest) {
+            boundedOptions.boundedMode = BoundedMode.LATEST;
+        }
 
         return createKafkaTableSource(
                 physicalDataType,
