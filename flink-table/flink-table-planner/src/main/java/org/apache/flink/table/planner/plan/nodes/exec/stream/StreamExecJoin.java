@@ -20,10 +20,13 @@
 package org.apache.flink.table.planner.plan.nodes.exec.stream;
 
 import org.apache.flink.FlinkVersion;
+import org.apache.flink.api.common.state.MapState;
+import org.apache.flink.api.common.state.MapStateDescriptor;
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.streaming.api.transformations.TwoInputTransformation;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.utils.JoinedRowData;
 import org.apache.flink.table.planner.delegation.PlannerBase;
 import org.apache.flink.table.planner.plan.nodes.exec.ExecEdge;
 import org.apache.flink.table.planner.plan.nodes.exec.ExecNodeBase;
@@ -35,12 +38,15 @@ import org.apache.flink.table.planner.plan.nodes.exec.SingleTransformationTransl
 import org.apache.flink.table.planner.plan.nodes.exec.spec.JoinSpec;
 import org.apache.flink.table.planner.plan.nodes.exec.utils.ExecNodeUtil;
 import org.apache.flink.table.planner.plan.utils.JoinUtil;
+import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.table.planner.plan.utils.KeySelectorUtil;
 import org.apache.flink.table.runtime.generated.GeneratedJoinCondition;
 import org.apache.flink.table.runtime.keyselector.RowDataKeySelector;
 import org.apache.flink.table.runtime.operators.join.FlinkJoinType;
 import org.apache.flink.table.runtime.operators.join.stream.AbstractStreamingJoinOperator;
+import org.apache.flink.table.runtime.operators.join.stream.BroadcastStreamingJoin;
 import org.apache.flink.table.runtime.operators.join.stream.StreamingJoinOperator;
+import org.apache.flink.streaming.api.operators.co.CoBroadcastWithKeyedOperator;
 import org.apache.flink.table.runtime.operators.join.stream.StreamingSemiAntiJoinOperator;
 import org.apache.flink.table.runtime.operators.join.stream.state.JoinInputSideSpec;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
@@ -57,6 +63,10 @@ import java.util.List;
 
 import static org.apache.flink.util.Preconditions.checkArgument;
 import static org.apache.flink.util.Preconditions.checkNotNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.apache.commons.lang3.ArrayUtils;
+
 
 /**
  * {@link StreamExecNode} for regular Joins.
@@ -89,6 +99,10 @@ public class StreamExecJoin extends ExecNodeBase<RowData>
     @JsonProperty(FIELD_NAME_RIGHT_UPSERT_KEYS)
     @JsonInclude(JsonInclude.Include.NON_DEFAULT)
     private final List<int[]> rightUpsertKeys;
+
+    private final Boolean leftIsBroadcast;
+    private final Boolean rightIsBroadcast;
+    private static final Logger LOG = LoggerFactory.getLogger(StreamExecJoin.class);
 
     public StreamExecJoin(
             ReadableConfig tableConfig,
@@ -127,6 +141,8 @@ public class StreamExecJoin extends ExecNodeBase<RowData>
         this.joinSpec = checkNotNull(joinSpec);
         this.leftUpsertKeys = leftUpsertKeys;
         this.rightUpsertKeys = rightUpsertKeys;
+        this.leftIsBroadcast = (inputProperties.get(0).getRequiredDistribution() == InputProperty.BROADCAST_DISTRIBUTION);
+        this.rightIsBroadcast = (inputProperties.get(1).getRequiredDistribution() == InputProperty.BROADCAST_DISTRIBUTION);
     }
 
     @Override
@@ -177,7 +193,7 @@ public class StreamExecJoin extends ExecNodeBase<RowData>
         final boolean isBatchBackfillEnabled = config.get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL);
         final boolean isMinibatchEnabled = config.get(ExecutionConfigOptions.TABLE_EXEC_MINIBATCH_ENABLED);
         final int maxMinibatchSize = config.get(ExecutionConfigOptions.TABLE_EXEC_MINIBATCH_JOIN_MAX_SIZE);
-
+        LOG.info("[Broadcast metadata] left: {} right {}", leftIsBroadcast, rightIsBroadcast);
         AbstractStreamingJoinOperator operator;
         FlinkJoinType joinType = joinSpec.getJoinType();
         if (joinType == FlinkJoinType.ANTI || joinType == FlinkJoinType.SEMI) {
@@ -194,7 +210,6 @@ public class StreamExecJoin extends ExecNodeBase<RowData>
                             isBatchBackfillEnabled,
                             isMinibatchEnabled,
                             maxMinibatchSize);
-
         } else {
             final boolean statelessNullKeysEnabled = config.get(ExecutionConfigOptions.TABLE_EXEC_STATELESS_JOIN_ON_NULL_KEY);
             boolean leftIsOuter = joinType == FlinkJoinType.LEFT || joinType == FlinkJoinType.FULL;
@@ -216,11 +231,50 @@ public class StreamExecJoin extends ExecNodeBase<RowData>
                             maxMinibatchSize,
                             joinSpec.getNonEquiCondition().isEmpty(),
                             statelessNullKeysEnabled);
-
         }
 
         final RowType returnType = (RowType) getOutputType();
+        MapStateDescriptor<RowData, Integer> broadcastStateDescriptor = new MapStateDescriptor<>("broadcast-records", leftIsBroadcast ? leftTypeInfo: rightTypeInfo, Types.INT);
+        RowDataKeySelector leftJoinKeySelector = KeySelectorUtil.getRowDataSelector(
+                planner.getFlinkContext().getClassLoader(),
+                leftJoinKey,
+                leftTypeInfo);
+        RowDataKeySelector rightJoinKeySelector = KeySelectorUtil.getRowDataSelector(
+                planner.getFlinkContext().getClassLoader(),
+                rightJoinKey,
+                rightTypeInfo);
+        RowDataKeySelector leftBroadcastKeySelector = KeySelectorUtil.getRowDataSelector(
+                planner.getFlinkContext().getClassLoader(),
+                ArrayUtils.addAll(leftJoinKey, leftUpsertKeys.get(0)),
+                leftTypeInfo);
+        RowDataKeySelector rightBroadcastKeySelector = KeySelectorUtil.getRowDataSelector(
+                planner.getFlinkContext().getClassLoader(),
+                ArrayUtils.addAll(rightJoinKey, rightUpsertKeys.get(0)),
+                rightTypeInfo);
+	RowDataKeySelector leftStateKeySelector = (leftIsBroadcast || rightIsBroadcast) ? ((leftIsBroadcast) ? rightBroadcastKeySelector: leftBroadcastKeySelector) : leftJoinKeySelector;
+        RowDataKeySelector rightStateKeySelector = (leftIsBroadcast || rightIsBroadcast) ? ((leftIsBroadcast) ? leftBroadcastKeySelector: rightBroadcastKeySelector) : rightJoinKeySelector;
+	
+        LOG.info("Broadcast state key fields {} {} {}", leftJoinKey, leftUpsertKeys, ArrayUtils.addAll(leftJoinKey, leftUpsertKeys.get(0)));
         final TwoInputTransformation<RowData, RowData, RowData> transform =
+                (leftIsBroadcast || rightIsBroadcast) ?
+                ExecNodeUtil.createTwoInputTransformation(
+                        leftIsBroadcast ? rightTransform: leftTransform,
+                        rightIsBroadcast? rightTransform: leftTransform,
+                        createTransformationMeta(JOIN_TRANSFORMATION, config),
+                        new CoBroadcastWithKeyedOperator(
+                                new BroadcastStreamingJoin(
+                                        broadcastStateDescriptor,
+                                        generatedCondition,
+                                        leftIsBroadcast? rightTypeInfo: leftTypeInfo,
+                                        leftIsBroadcast? leftTypeInfo: rightTypeInfo,
+                                        leftIsBroadcast,
+                                        leftIsBroadcast ? rightJoinKeySelector: leftJoinKeySelector, 
+                                        leftIsBroadcast? leftJoinKeySelector: rightJoinKeySelector,
+                                        rightStateKeySelector,
+                                        leftStateKeySelector),
+                                List.of(broadcastStateDescriptor)),
+                        InternalTypeInfo.of(returnType),
+                        leftTransform.getParallelism()) :
                 ExecNodeUtil.createTwoInputTransformation(
                         leftTransform,
                         rightTransform,
@@ -229,15 +283,8 @@ public class StreamExecJoin extends ExecNodeBase<RowData>
                         InternalTypeInfo.of(returnType),
                         leftTransform.getParallelism());
 
-        // set KeyType and Selector for state
-        RowDataKeySelector leftSelect =
-                KeySelectorUtil.getRowDataSelector(
-                        planner.getFlinkContext().getClassLoader(), leftJoinKey, leftTypeInfo);
-        RowDataKeySelector rightSelect =
-                KeySelectorUtil.getRowDataSelector(
-                        planner.getFlinkContext().getClassLoader(), rightJoinKey, rightTypeInfo);
-        transform.setStateKeySelectors(leftSelect, rightSelect);
-        transform.setStateKeyType(leftSelect.getProducedType());
+        transform.setStateKeySelectors(leftStateKeySelector, rightStateKeySelector);
+        transform.setStateKeyType(leftStateKeySelector.getProducedType());
         return transform;
     }
 }

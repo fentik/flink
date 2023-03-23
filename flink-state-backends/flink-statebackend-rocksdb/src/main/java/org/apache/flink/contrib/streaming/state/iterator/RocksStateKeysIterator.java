@@ -27,6 +27,8 @@ import javax.annotation.Nonnull;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Adapter class to bridge between {@link RocksIteratorWrapper} and {@link Iterator} to iterate over
@@ -37,7 +39,9 @@ import java.util.Objects;
 public class RocksStateKeysIterator<K> extends AbstractRocksStateKeysIterator<K>
         implements Iterator<K> {
 
+    private static final Logger LOG = LoggerFactory.getLogger(RocksStateKeysIterator.class);
     @Nonnull private final byte[] namespaceBytes;
+    private final byte[] prefixBytes;
 
     private K nextKey;
     private K previousKey;
@@ -48,11 +52,13 @@ public class RocksStateKeysIterator<K> extends AbstractRocksStateKeysIterator<K>
             @Nonnull TypeSerializer<K> keySerializer,
             int keyGroupPrefixBytes,
             boolean ambiguousKeyPossible,
-            @Nonnull byte[] namespaceBytes) {
+            @Nonnull byte[] namespaceBytes,
+            byte[] prefixBytes) {
         super(iterator, state, keySerializer, keyGroupPrefixBytes, ambiguousKeyPossible);
         this.namespaceBytes = namespaceBytes;
         this.nextKey = null;
         this.previousKey = null;
+        this.prefixBytes = prefixBytes;
     }
 
     @Override
@@ -63,7 +69,7 @@ public class RocksStateKeysIterator<K> extends AbstractRocksStateKeysIterator<K>
                 final byte[] keyBytes = iterator.key();
                 final K currentKey = deserializeKey(keyBytes, byteArrayDataInputView);
                 final int namespaceByteStartPos = byteArrayDataInputView.getPosition();
-
+                LOG.info("namespaceByteStartPos {} {}", namespaceByteStartPos, namespaceBytes.length);
                 if (isMatchingNameSpace(keyBytes, namespaceByteStartPos)
                         && !Objects.equals(previousKey, currentKey)) {
                     previousKey = currentKey;
@@ -100,5 +106,22 @@ public class RocksStateKeysIterator<K> extends AbstractRocksStateKeysIterator<K>
             return true;
         }
         return false;
+    }
+
+    private boolean isMatchingPrefix(@Nonnull byte[] key) {
+        LOG.info("Checking for matching prefix {} {}", key, prefixBytes);
+        // if (prefixBytes != null) {
+        //     if (key.length < prefixBytes.length) {
+        //         return false;
+        //     }
+        //     for (int i = prefixBytes.length; --i >= keyGroupPrefixBytes; ) {
+        //         if (key[i] != prefixBytes[i]) {
+        //             return false;
+        //         }
+        //     }
+        //     LOG.info("Prefix matches {} {}", key, prefixBytes);
+        //     return true;
+        // }
+        return true;
     }
 }

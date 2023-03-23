@@ -235,6 +235,25 @@ public class CoBroadcastWithKeyedOperator<KS, IN1, IN2, OUT>
                     Preconditions.checkNotNull(stateDescriptor),
                     Preconditions.checkNotNull(function));
         }
+
+        @Override
+        public <VS, S extends State> void applyToKeyedStateWithPrefix(
+                final StateDescriptor<S, VS> stateDescriptor,
+                final KeyedStateFunction<KS, S> function,
+                final KS prefix)
+                throws Exception {
+
+            keyedStateBackend.applyToAllKeysWithPrefix(
+                    VoidNamespace.INSTANCE,
+                    VoidNamespaceSerializer.INSTANCE,
+                    Preconditions.checkNotNull(stateDescriptor),
+                    Preconditions.checkNotNull(function),
+                    prefix);
+        }
+        
+        public KeyedStateBackend<KS> getKeyedStateBackend() {
+            return keyedStateBackend;
+        }
     }
 
     private class ReadOnlyContextImpl extends ReadOnlyContext {
@@ -291,6 +310,7 @@ public class CoBroadcastWithKeyedOperator<KS, IN1, IN2, OUT>
         }
 
         @Override
+        @SuppressWarnings("unchecked")
         public <K, V> ReadOnlyBroadcastState<K, V> getBroadcastState(
                 MapStateDescriptor<K, V> stateDescriptor) {
             Preconditions.checkNotNull(stateDescriptor);

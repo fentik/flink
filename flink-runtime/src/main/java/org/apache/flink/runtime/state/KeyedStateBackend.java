@@ -67,6 +67,13 @@ public interface KeyedStateBackend<K>
             final KeyedStateFunction<K, S> function)
             throws Exception;
 
+    <N, S extends State, T> void applyToAllKeysWithPrefix(
+            final N namespace,
+            final TypeSerializer<N> namespaceSerializer,
+            final StateDescriptor<S, T> stateDescriptor,
+            final KeyedStateFunction<K, S> function,
+            final K prefix) throws Exception;
+
     /**
      * @return A stream of all keys for the given state and namespace. Modifications to the state
      *     during iterating over it keys are not supported.

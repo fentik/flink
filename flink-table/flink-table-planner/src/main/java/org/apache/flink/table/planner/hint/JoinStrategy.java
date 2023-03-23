@@ -93,4 +93,8 @@ public enum JoinStrategy {
     public static boolean isLookupHint(String hintName) {
         return isJoinStrategy(hintName) && JoinStrategy.valueOf(hintName) == LOOKUP;
     }
+
+    public static boolean isBroadcastHint(String hintName) {
+        return isJoinStrategy(hintName) && JoinStrategy.valueOf(hintName) == BROADCAST;
+    }
 }

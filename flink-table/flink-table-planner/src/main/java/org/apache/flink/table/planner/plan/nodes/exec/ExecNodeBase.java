@@ -202,6 +202,14 @@ public abstract class ExecNodeBase<T> implements ExecNode<T> {
                                         == InputProperty.DistributionType.SINGLETON);
     }
 
+    protected boolean inputsContainBroadcast() {
+        return getInputProperties().stream()
+                .anyMatch(
+                        p ->
+                                p.getRequiredDistribution().getType()
+                                        == InputProperty.DistributionType.BROADCAST);
+    }
+
     @JsonIgnore
     protected String getSimplifiedName() {
         return getClass().getSimpleName().replace("StreamExec", "").replace("BatchExec", "");

@@ -67,6 +67,7 @@ import org.apache.flink.util.IOUtils;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.ResourceGuard;
 import org.apache.flink.util.StateMigrationException;
+import org.apache.flink.runtime.state.KeyedStateFunction;
 
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.ColumnFamilyOptions;
@@ -336,6 +337,7 @@ public class RocksDBKeyedStateBackend<K> extends AbstractKeyedStateBackend<K> {
     @SuppressWarnings("unchecked")
     @Override
     public <N> Stream<K> getKeys(String state, N namespace) {
+        
         RocksDbKvStateInfo columnInfo = kvStateInformation.get(state);
         if (columnInfo == null
                 || !(columnInfo.metaInfo instanceof RegisteredKeyValueStateBackendMetaInfo)) {
@@ -372,13 +374,116 @@ public class RocksDBKeyedStateBackend<K> extends AbstractKeyedStateBackend<K> {
                         getKeySerializer(),
                         keyGroupPrefixBytes,
                         ambiguousKeyPossible,
-                        nameSpaceBytes);
+                        nameSpaceBytes,
+                        null);
 
         Stream<K> targetStream =
                 StreamSupport.stream(
                         Spliterators.spliteratorUnknownSize(iteratorWrapper, Spliterator.ORDERED),
                         false);
         return targetStream.onClose(iteratorWrapper::close);
+    }
+
+    public <N> Stream<K> getKeysWithPrefix(String state, N namespace, K prefix) {
+        RocksDbKvStateInfo columnInfo = kvStateInformation.get(state);
+        if (columnInfo == null
+                || !(columnInfo.metaInfo instanceof RegisteredKeyValueStateBackendMetaInfo)) {
+            return Stream.empty();
+        }
+        LOG.info("getKeysWithPrefix {} {} {}", state, namespace, prefix);
+        RegisteredKeyValueStateBackendMetaInfo<N, ?> registeredKeyValueStateBackendMetaInfo =
+                (RegisteredKeyValueStateBackendMetaInfo<N, ?>) columnInfo.metaInfo;
+
+        final TypeSerializer<N> namespaceSerializer =
+                registeredKeyValueStateBackendMetaInfo.getNamespaceSerializer();
+        final DataOutputSerializer namespaceOutputView = new DataOutputSerializer(8);
+        boolean ambiguousKeyPossible =
+                CompositeKeySerializationUtils.isAmbiguousKeyPossible(
+                        getKeySerializer(), namespaceSerializer);
+        final byte[] nameSpaceBytes;
+        final DataOutputSerializer prefixOutputView = new DataOutputSerializer(128);
+        final byte[] prefixBytes;
+        try {
+            CompositeKeySerializationUtils.writeNameSpace(
+                    namespace, namespaceSerializer, namespaceOutputView, ambiguousKeyPossible);
+            nameSpaceBytes = namespaceOutputView.getCopyOfBuffer();
+        } catch (IOException ex) {
+            throw new FlinkRuntimeException("Failed to get keys from RocksDB state backend.", ex);
+        }
+
+        try {
+
+                prefixBytes = sharedRocksKeyBuilder.buildCompositeKeyNamesSpaceUserKey(
+                        namespace,
+                        namespaceSerializer,
+                        prefix,
+                        getKeySerializer()
+                );
+                // CompositeKeySerializationUtils.writeKey(
+                //         prefix, getKeySerializer(), prefixOutputView, ambiguousKeyPossible);
+                // prefixBytes = prefixOutputView.getCopyOfBuffer();
+                LOG.info("Prefix bytes -> user key {} {}", prefixBytes, nameSpaceBytes);
+        } catch (IOException ex) {
+                throw new FlinkRuntimeException("Failed to get keys from RocksDB state backend.", ex);
+        }
+        RocksIteratorWrapper iterator =
+                RocksDBOperationUtils.getRocksIterator(
+                        db, columnInfo.columnFamilyHandle, readOptions);
+        
+        // try {
+                
+        //         prefixBytes = sharedRocksKeyBuilder.buildCompositeKeyUserKey(
+        //                 prefix,
+        //                 getKeySerializer());
+                
+        //         LOG.info("Prefix bytes -> user key {} {}", prefixBytes, nameSpaceBytes);
+                
+        // } catch (IOException shouldNeverHappen) {
+        //         throw new FlinkRuntimeException(shouldNeverHappen);
+        // }
+        iterator.seekToFirst();
+        final RocksStateKeysIterator<K> iteratorWrapper =
+                new RocksStateKeysIterator<>(
+                        iterator,
+                        state,
+                        getKeySerializer(),
+                        keyGroupPrefixBytes,
+                        ambiguousKeyPossible,
+                        nameSpaceBytes,
+                        prefixBytes);
+        Stream<K> targetStream =
+                StreamSupport.stream(
+                        Spliterators.spliteratorUnknownSize(iteratorWrapper, Spliterator.ORDERED),
+                        false);
+        return targetStream.onClose(iteratorWrapper::close);
+    }
+
+    public <N, S extends State, T> void applyToAllKeysWithPrefix(
+            final N namespace,
+            final TypeSerializer<N> namespaceSerializer,
+            final StateDescriptor<S, T> stateDescriptor,
+            final KeyedStateFunction<K, S> function,
+            final K prefix)
+            throws Exception {
+        PartitionStateFactory partitionStateFactory = this::getPartitionedState;
+        
+        try (Stream<K> keyStream = getKeysWithPrefix(stateDescriptor.getName(), namespace, prefix)) {
+
+            final S state =
+                    partitionStateFactory.get(namespace, namespaceSerializer, stateDescriptor);
+
+            keyStream.forEach(
+                    (K key) -> {
+                        setCurrentKey(key);
+                        try {
+                            function.process(key, state);
+                        } catch (Throwable e) {
+                            // we wrap the checked exception in an unchecked
+                            // one and catch it (and re-throw it) later.
+                            throw new RuntimeException(e);
+                        }
+                    });
+        }
     }
 
     @Override

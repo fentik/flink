@@ -17,7 +17,7 @@
  */
 package org.apache.flink.table.planner.plan.rules.physical.stream
 
-import org.apache.flink.table.api.TableException
+import org.apache.flink.table.api.{TableConfig, TableException}
 import org.apache.flink.table.planner.calcite.FlinkTypeFactory
 import org.apache.flink.table.planner.plan.nodes.FlinkRelNode
 import org.apache.flink.table.planner.plan.nodes.logical.{FlinkLogicalJoin, FlinkLogicalRel, FlinkLogicalSnapshot}
@@ -25,6 +25,10 @@ import org.apache.flink.table.planner.plan.nodes.physical.stream.StreamPhysicalJ
 import org.apache.flink.table.planner.plan.utils.JoinUtil.{accessesTimeAttribute, combineJoinInputsRowType, satisfyRegularJoin}
 import org.apache.flink.table.planner.plan.utils.TemporalJoinUtil.containsInitialTemporalJoinCondition
 import org.apache.flink.util.Preconditions.checkState
+import org.apache.flink.table.planner.hint.JoinStrategy
+import org.apache.flink.table.planner.utils.ShortcutUtils.unwrapTableConfig
+import org.apache.flink.table.planner.utils.TableConfigUtils.isOperatorDisabled
+import org.apache.calcite.rel.core.{Join, JoinRelType}
 
 import org.apache.calcite.plan.{RelOptRule, RelOptRuleCall, RelTraitSet}
 import org.apache.calcite.rel.RelNode
@@ -75,13 +79,17 @@ class StreamPhysicalJoinRule extends StreamPhysicalJoinRuleBase("StreamPhysicalJ
       rightInput: FlinkRelNode,
       rightConversion: RelNode => RelNode,
       providedTraitSet: RelTraitSet): FlinkRelNode = {
+
+    val (isBroadcast, leftIsBuild) = checkBroadcast(join)
     new StreamPhysicalJoin(
       join.getCluster,
       providedTraitSet,
       leftConversion(leftInput),
       rightConversion(rightInput),
       join.getCondition,
-      join.getJoinType)
+      join.getJoinType,
+      leftIsBuild,
+      isBroadcast)
   }
 }
 

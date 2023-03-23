@@ -32,6 +32,7 @@ import org.apache.calcite.rel.metadata.RelMetadataQuery
 import org.apache.calcite.rex.RexNode
 
 import scala.collection.JavaConversions._
+import org.apache.flink.api.scala._
 
 /**
  * Stream physical RelNode for regular [[Join]].
@@ -45,9 +46,11 @@ class StreamPhysicalJoin(
     leftRel: RelNode,
     rightRel: RelNode,
     condition: RexNode,
-    joinType: JoinRelType)
+    joinType: JoinRelType,
+    leftIsBuild: Boolean,
+    isBroadcast: Boolean)
   extends CommonPhysicalJoin(cluster, traitSet, leftRel, rightRel, condition, joinType)
-  with StreamPhysicalRel {
+  with StreamPhysicalRel{
 
   /**
    * This is mainly used in `FlinkChangelogModeInferenceProgram.SatisfyUpdateKindTraitVisitor`. If
@@ -84,12 +87,14 @@ class StreamPhysicalJoin(
       right: RelNode,
       joinType: JoinRelType,
       semiJoinDone: Boolean): Join = {
-    new StreamPhysicalJoin(cluster, traitSet, left, right, conditionExpr, joinType)
+    new StreamPhysicalJoin(cluster, traitSet, left, right, conditionExpr, joinType, leftIsBuild, isBroadcast)
   }
 
   override def explainTerms(pw: RelWriter): RelWriter = {
     super
       .explainTerms(pw)
+      .itemIf("isBroadcast", "true", isBroadcast)
+      .item("build", if (leftIsBuild) "left" else "right")
       .item(
         "leftInputSpec",
         JoinUtil.analyzeJoinInput(
@@ -116,14 +121,40 @@ class StreamPhysicalJoin(
   }
 
   override def translateToExecNode(): ExecNode[_] = {
+    val (leftEdge, rightEdge) = getInputProperties
     new StreamExecJoin(
       unwrapTableConfig(this),
       joinSpec,
       getUpsertKeys(left, joinSpec.getLeftKeys),
       getUpsertKeys(right, joinSpec.getRightKeys),
-      InputProperty.DEFAULT,
-      InputProperty.DEFAULT,
+      leftEdge,
+      rightEdge,
       FlinkTypeFactory.toLogicalRowType(getRowType),
       getRelDetailedDescription)
+  }
+
+  private def getInputProperties: (InputProperty, InputProperty) = {
+    if (isBroadcast) {
+      val (buildRequiredDistribution, probeRequiredDistribution) = (InputProperty.BROADCAST_DISTRIBUTION, InputProperty.ANY_DISTRIBUTION)
+      val buildEdge = InputProperty
+        .builder()
+        .requiredDistribution(buildRequiredDistribution)
+        .priority(0)
+        .build()
+      val probeEdge = InputProperty
+        .builder()
+        .requiredDistribution(probeRequiredDistribution)
+        .priority(1)
+        .build()
+      if (leftIsBuild) {
+        (buildEdge, probeEdge)
+      }
+      else {
+        (probeEdge, buildEdge)
+      }
+    }
+    else {
+      (InputProperty.DEFAULT, InputProperty.DEFAULT)
+    }
   }
 }

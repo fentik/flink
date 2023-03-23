@@ -26,6 +26,7 @@ import org.apache.flink.runtime.state.KeyedStateFunction;
 import org.apache.flink.streaming.api.TimeDomain;
 import org.apache.flink.streaming.api.TimerService;
 import org.apache.flink.util.Collector;
+import org.apache.flink.runtime.state.KeyedStateBackend;
 
 /**
  * A function to be applied to a {@link
@@ -148,6 +149,16 @@ public abstract class KeyedBroadcastProcessFunction<KS, IN1, IN2, OUT>
                 final StateDescriptor<S, VS> stateDescriptor,
                 final KeyedStateFunction<KS, S> function)
                 throws Exception;
+        
+        public abstract <VS, S extends State> void applyToKeyedStateWithPrefix(
+                final StateDescriptor<S, VS> stateDescriptor,
+                final KeyedStateFunction<KS, S> function,
+                final KS prefix)
+                throws Exception;
+        
+        public KeyedStateBackend<KS> getKeyedStateBackend() {
+            return null;
+        }
     }
 
     /**

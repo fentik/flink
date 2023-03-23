@@ -60,7 +60,6 @@ public class ExecutionCheckpointingOptions {
                                     + "up to this value.  Used to avoid exceeding rate limits on "
                                     + "S3.");
 
-
     public static final ConfigOption<Duration> CHECKPOINTING_TIMEOUT =
             ConfigOptions.key("execution.checkpointing.timeout")
                     .durationType()
@@ -270,13 +269,12 @@ public class ExecutionCheckpointingOptions {
                                                     "the important considerations"))
                                     .build());
 
-    public static final ConfigOption<String> PER_OPERATOR_PARALLELISM = ConfigOptions
-            .key("execution.checkpointing.per-operator-parallelism")
-            .stringType()
-            .defaultValue("")
-            .withDescription(
-                    "Sets per operator ID parallelism to help us selectively rescale down jobs with small"
-                            + " operator states. The format is a list of opId,parallelism pairs in string format."
-                            + " Exammple: '927799aa5f58e46f12593a76acc4dba3,64,ed48e05970c6882d033071b3313259ee,64'");
-
+    public static final ConfigOption<String> PER_OPERATOR_PARALLELISM =
+            ConfigOptions.key("execution.checkpointing.per-operator-parallelism")
+                    .stringType()
+                    .defaultValue("")
+                    .withDescription(
+                            "Sets per operator ID parallelism to help us selectively rescale down jobs with small"
+                                    + " operator states. The format is a list of opId,parallelism pairs in string format."
+                                    + " Exammple: '927799aa5f58e46f12593a76acc4dba3,64,ed48e05970c6882d033071b3313259ee,64'");
 }

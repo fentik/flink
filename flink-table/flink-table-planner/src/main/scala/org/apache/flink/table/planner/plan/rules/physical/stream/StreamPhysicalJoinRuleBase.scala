@@ -28,6 +28,8 @@ import org.apache.calcite.plan.{RelOptRule, RelOptRuleCall, RelTraitSet}
 import org.apache.calcite.plan.RelOptRule.{any, operand}
 import org.apache.calcite.rel.RelNode
 import org.apache.calcite.rex.RexNode
+import org.apache.calcite.rel.core.{Join}
+import org.apache.flink.table.planner.hint.JoinStrategy
 
 import java.util
 
@@ -36,7 +38,7 @@ import java.util
  * join and temporal join.
  */
 abstract class StreamPhysicalJoinRuleBase(description: String)
-  extends RelOptRule(
+  extends RelOptRule (
     operand(
       classOf[FlinkLogicalJoin],
       operand(classOf[FlinkLogicalRel], any()),
@@ -55,6 +57,22 @@ abstract class StreamPhysicalJoinRuleBase(description: String)
       unwrapClassLoader(join))
   }
 
+  protected def checkBroadcast(join: Join): (Boolean, Boolean) = {
+      val allHints = join.getHints
+      allHints.forEach(
+        relHint => {
+          if (JoinStrategy.isBroadcastHint(relHint.hintName)) {
+            if (relHint.listOptions.get(0).equals(JoinStrategy.LEFT_INPUT)) {
+              return (true, true)
+            } else {
+              return (true, false)
+            }
+          }
+        }
+      )
+      return (false, false)
+  }
+
   override def onMatch(call: RelOptRuleCall): Unit = {
     val join = call.rel[FlinkLogicalJoin](0)
     val left = call.rel[FlinkLogicalRel](1)
@@ -62,9 +80,12 @@ abstract class StreamPhysicalJoinRuleBase(description: String)
 
     def toHashTraitByColumns(
         columns: util.Collection[_ <: Number],
-        inputTraitSet: RelTraitSet): RelTraitSet = {
+        inputTraitSet: RelTraitSet,
+        isBroadcast: Boolean): RelTraitSet = {
       val distribution = if (columns.size() == 0) {
         FlinkRelDistribution.SINGLETON
+      } else if (isBroadcast) {
+        FlinkRelDistribution.BROADCAST_DISTRIBUTED
       } else {
         FlinkRelDistribution.hash(columns)
       }
@@ -73,20 +94,23 @@ abstract class StreamPhysicalJoinRuleBase(description: String)
         .replace(distribution)
     }
 
-    def convertInput(input: RelNode, columns: util.Collection[_ <: Number]): RelNode = {
-      val requiredTraitSet = toHashTraitByColumns(columns, input.getTraitSet)
+    def convertInput(input: RelNode, columns: util.Collection[_ <: Number], isBroadcast: Boolean): RelNode = {
+      val requiredTraitSet = toHashTraitByColumns(columns, input.getTraitSet, isBroadcast)
       RelOptRule.convert(input, requiredTraitSet)
     }
 
+    val (isBroadcast, isLeft) = checkBroadcast(join)
+    val broadcastLeftInput = if (isBroadcast && isLeft) {true} else {false}
+    val broadcastRightInput = if (isBroadcast && !isLeft) {true} else {false}
     val newJoin = transform(
       join,
       left,
       leftInput => {
-        convertInput(leftInput, computeJoinLeftKeys(join))
+        convertInput(leftInput, computeJoinLeftKeys(join), broadcastLeftInput)
       },
       right,
       rightInput => {
-        convertInput(rightInput, computeJoinRightKeys(join))
+        convertInput(rightInput, computeJoinRightKeys(join), broadcastRightInput)
       },
       join.getTraitSet.replace(FlinkConventions.STREAM_PHYSICAL)
     )

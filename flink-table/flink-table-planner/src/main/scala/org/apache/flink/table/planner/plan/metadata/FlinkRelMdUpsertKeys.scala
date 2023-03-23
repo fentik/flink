@@ -86,6 +86,7 @@ class FlinkRelMdUpsertKeys private extends MetadataHandler[UpsertKeys] {
       case RelDistribution.Type.HASH_DISTRIBUTED =>
         filterKeys(keys, ImmutableBitSet.of(rel.getDistribution.getKeys))
       case RelDistribution.Type.SINGLETON => keys
+      case RelDistribution.Type.BROADCAST_DISTRIBUTED => keys
       case t => throw new UnsupportedOperationException("Unsupported distribution type: " + t)
     }
   }

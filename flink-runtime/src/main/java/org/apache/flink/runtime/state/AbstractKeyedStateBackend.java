@@ -34,6 +34,7 @@ import org.apache.flink.runtime.state.metrics.LatencyTrackingStateConfig;
 import org.apache.flink.runtime.state.metrics.LatencyTrackingStateFactory;
 import org.apache.flink.runtime.state.ttl.TtlStateFactory;
 import org.apache.flink.runtime.state.ttl.TtlTimeProvider;
+import org.apache.flink.util.FlinkRuntimeException;
 import org.apache.flink.util.IOUtils;
 import org.apache.flink.util.Preconditions;
 
@@ -311,6 +312,17 @@ public abstract class AbstractKeyedStateBackend<K>
                 stateDescriptor,
                 function,
                 this::getPartitionedState);
+    }
+
+    @Override
+    public <N, S extends State, T> void applyToAllKeysWithPrefix(
+            final N namespace,
+            final TypeSerializer<N> namespaceSerializer,
+            final StateDescriptor<S, T> stateDescriptor,
+            final KeyedStateFunction<K, S> function,
+            final K prefix) throws Exception {
+            throw new FlinkRuntimeException(String.format(
+                "applyToAllKeysWithPrefix is not supported for %s", stateDescriptor.getClass()));
     }
 
     public <N, S extends State, T> void applyToAllKeys(

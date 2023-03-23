@@ -821,7 +821,7 @@ public class Configuration extends ExecutionConfig.GlobalJobParameters
                     fallbackKey.getKey(),
                     configOption.key());
         } else {
-            LOG.info(
+            LOG.debug(
                     "Config uses fallback configuration key '{}' instead of key '{}'",
                     fallbackKey.getKey(),
                     configOption.key());

@@ -79,6 +79,7 @@ class StreamPhysicalTableSourceScanRule
       val inputFieldNames = newScan.getRowType.getFieldNames
       val primaryKeyIndices = ScanUtil.getPrimaryKeyIndices(inputFieldNames, keyFields)
       val requiredDistribution = FlinkRelDistribution.hash(primaryKeyIndices, requireStrict = true)
+      // Why is this setting distribution to Hash?
       val requiredTraitSet = rel.getCluster.getPlanner
         .emptyTraitSet()
         .replace(requiredDistribution)
