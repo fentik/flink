@@ -40,6 +40,7 @@ object FlinkStreamProgram {
   val TIME_INDICATOR = "time_indicator"
   val PHYSICAL = "physical"
   val PHYSICAL_REWRITE = "physical_rewrite"
+  val SALT_JOINS = "salt_joins"
 
   def buildProgram(tableConfig: ReadableConfig): FlinkChainedProgram[StreamOptimizeContext] = {
     val chainedProgram = new FlinkChainedProgram[StreamOptimizeContext]()
@@ -229,6 +230,22 @@ object FlinkStreamProgram {
           .build()
       )
     }
+
+    // salt left joins
+    chainedProgram.addLast(
+      SALT_JOINS,
+      FlinkGroupProgramBuilder
+        .newBuilder[StreamOptimizeContext]
+        .addProgram(
+          FlinkHepRuleSetProgramBuilder.newBuilder
+            .setHepRulesExecutionType(HEP_RULES_EXECUTION_TYPE.RULE_SEQUENCE)
+            .setHepMatchOrder(HepMatchOrder.BOTTOM_UP)
+            .add(FlinkStreamRuleSets.RUBICON_RULES)
+            .build(),
+          "salt left joins to prevent hot nulls data skew"
+        )
+        .build()
+    )
 
     // project rewrite
     chainedProgram.addLast(
