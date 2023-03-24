@@ -27,6 +27,7 @@ import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.streaming.connectors.kafka.config.BoundedMode;
 import org.apache.flink.streaming.connectors.kafka.config.StartupMode;
+import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.ResolvedSchema;
@@ -129,6 +130,11 @@ public class UpsertKafkaDynamicTableFactory
         // always use earliest to keep data integrity
         StartupMode earliest = StartupMode.EARLIEST;
 
+	final boolean isBoundedLatest =
+                context.getConfiguration().get(ExecutionConfigOptions.TABLE_EXEC_BATCH_BACKFILL)
+                        || context.getConfiguration()
+                                .get(ExecutionConfigOptions.TABLE_EXEC_IS_BOUNDED_LATEST);
+
         return new KafkaDynamicSource(
                 context.getPhysicalRowDataType(),
                 keyDecodingFormat,
@@ -142,7 +148,7 @@ public class UpsertKafkaDynamicTableFactory
                 earliest,
                 Collections.emptyMap(),
                 0,
-                BoundedMode.UNBOUNDED,
+                isBoundedLatest ? BoundedMode.LATEST : BoundedMode.UNBOUNDED,
                 Collections.emptyMap(),
                 0,
                 true,
