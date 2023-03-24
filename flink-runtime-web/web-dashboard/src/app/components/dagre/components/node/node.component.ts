@@ -44,6 +44,7 @@ export class NodeComponent {
   backgroundBusyColor = '#ee6464';
   backgroundDefaultColor = '#5db1ff';
   backgroundBackPressuredColor = '#888888';
+  backgroundFinishedColor = '#81B622';
   borderBusyColor = '#ee2222';
   borderDefaultColor = '#1890ff';
   borderBackPressuredColor = '#000000';
@@ -157,6 +158,9 @@ export class NodeComponent {
         this.borderBackPressuredColor,
         node.backPressuredPercentage / 100.0
       );
+    }
+    if (node.lowWatermark == 9223372036854776000) {
+      this.backgroundColor = this.backgroundFinishedColor;
     }
     this.cd.markForCheck();
   }
