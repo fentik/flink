@@ -193,7 +193,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
             if (!leftIsOuter) {
                 // performance optimization: if the input key is null and it's
                 // not an outer side, we can simply ignore the input row
-                LOG.debug("Performance Optimization - Dropping left input={}", leftInputSerializer.asString(element.getValue()));
+                // LOG.debug("Performance Optimization - Dropping left input={}", leftInputSerializer.asString(element.getValue()));
                 leftInputDroppedNullKeyCount.inc();
                 return;
             } else if (StreamingPerfOptimizationUtil.isEligibleForNullEquijoinOptimization(
@@ -207,7 +207,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                 // condition will result in an association failure, so
                 // we will never have associated rows data from the
                 // other side to pass through
-                LOG.debug("Performance Optimization - Left outer join on null key, input={}", leftInputSerializer.asString(element.getValue()));
+                // LOG.debug("Performance Optimization - Left outer join on null key, input={}", leftInputSerializer.asString(element.getValue()));
                 leftInputNullOuterEquiJoinOptimizationCount.inc();
                 outputNullPaddingForce(element.getValue(), true);
                 return;
@@ -232,7 +232,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
             if (!rightIsOuter) {
                 // performance optimization: if the input key is null and it's
                 // not an outer side, we can simply ignore the input row
-                LOG.debug("Performance Optimization - Dropping RIGHT input={}", rightInputSerializer.asString(element.getValue()));
+                // LOG.debug("Performance Optimization - Dropping RIGHT input={}", rightInputSerializer.asString(element.getValue()));
                 rightInputDroppedNullKeyCount.inc();
                 return;
             } else if (StreamingPerfOptimizationUtil.isEligibleForNullEquijoinOptimization(
@@ -246,7 +246,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                 // condition will result in an association failure, so
                 // we will never have associated rows data from the
                 // other side to pass through
-                LOG.debug("Performance Optimization - Right outer join on null key, input={}", rightInputSerializer.asString(element.getValue()));
+                // LOG.debug("Performance Optimization - Right outer join on null key, input={}", rightInputSerializer.asString(element.getValue()));
                 rightInputNullOuterEquiJoinOptimizationCount.inc();
                 outputNullPaddingForce(element.getValue(), false);
                 return;
