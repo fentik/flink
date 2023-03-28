@@ -33,6 +33,8 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.table.runtime.keyselector.RowDataKeySelector;
 import org.apache.flink.api.java.functions.KeySelector;
+import org.apache.flink.metrics.Counter;
+import org.apache.flink.metrics.Gauge;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -93,16 +95,18 @@ public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
 
     private static final Logger LOG = LoggerFactory.getLogger(DedupSinkUpsertMaterializer.class);
 
-    private final InternalTypeInfo<RowData> recordType;
     private final GeneratedRecordEqualiser generatedEqualiser;
     private final RowDataStringSerializer rowStringSerializer;
-    private final boolean isBatchBackfillEnabled;
     private boolean isStreaming;
     private final LinkedHashMap<RowData, List<RowData>> buffer;
     private transient RecordEqualiser equaliser;
     private final KeySelector<RowData, RowData> keySelector;
 
     private transient TimestampedCollector<RowData> collector;
+    private transient Counter numRetractIterations;
+    private transient Counter numBatchKeys;
+    private transient Counter numBatchElements;
+    private transient int maxBatchBucketSize;
 
     public DedupSinkUpsertMaterializer(
             StateTtlConfig ttlConfig,
@@ -110,10 +114,8 @@ public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
             GeneratedRecordEqualiser generatedEqualiser,
             RowDataKeySelector keySelector,
             boolean isBatchBackfillEnabled) {
-        this.recordType = recordType;
         this.generatedEqualiser = generatedEqualiser;
         this.rowStringSerializer = new RowDataStringSerializer(recordType.toRowType());
-        this.isBatchBackfillEnabled = isBatchBackfillEnabled;
         this.keySelector = keySelector;
         this.isStreaming = isBatchBackfillEnabled ? false : true;
         this.buffer = new LinkedHashMap<>();
@@ -124,9 +126,20 @@ public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
         super.open();
         this.equaliser = generatedEqualiser.newInstance(getRuntimeContext().getUserCodeClassLoader());
         this.collector = new TimestampedCollector<>(output);
+        this.numRetractIterations = getRuntimeContext().getMetricGroup().counter("numRetractIterations");
+        this.numBatchKeys = getRuntimeContext().getMetricGroup().counter("numBatchKeys");
+        this.numBatchElements = getRuntimeContext().getMetricGroup().counter("numBatchElements");
+        this.maxBatchBucketSize = 0;
+        getRuntimeContext().getMetricGroup().gauge("maxBatchBucketSize", new Gauge<Integer>() {
+            @Override
+            public Integer getValue() {
+                return maxBatchBucketSize;
+            }
+        });
     }
 
     private void flushBatch() throws Exception {
+        int maxBucketSize = 0;
         for (Map.Entry<RowData, List<RowData>> entry : buffer.entrySet()) {
             // emit the last accumulated message per unique key in a batch
             List<RowData> values = entry.getValue();
@@ -136,7 +149,15 @@ public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
                     rowStringSerializer.asString(lastRow),
                     isStreaming ? "STREAMING" : "BATCH BACKFILL");
             collector.collect(lastRow);
+
+            if (values.size() > maxBucketSize) {
+                maxBucketSize = values.size();
+            }
+
+            numBatchKeys.inc();
+            numBatchElements.inc(values.size());
         }
+
         buffer.clear();
     }
 
@@ -201,6 +222,7 @@ public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
             Iterator<RowData> iter = values.iterator();
             boolean removed = false;
             while (iter.hasNext()) {
+                numRetractIterations.inc();
                 RowData elementRow = iter.next();
                 // we need to make sure that row kind matches for comparison
                 row.setRowKind(elementRow.getRowKind());
