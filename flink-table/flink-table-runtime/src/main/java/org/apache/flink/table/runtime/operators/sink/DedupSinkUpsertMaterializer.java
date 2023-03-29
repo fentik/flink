@@ -133,7 +133,6 @@ public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
     private void emitLastRowForKey(List<Tuple2<RowData, Long>> values) {
         // emit the last accumulated message per unique key in a batch
         RowData lastRow = values.get(values.size() - 1).f0;
-        LOG.info("{} EMIT {}", getOperatorName(), rowStringSerializer.asString(lastRow));
         collector.collect(lastRow);
     }
 
