@@ -19,6 +19,7 @@
 package org.apache.flink.table.runtime.operators.sink;
 
 import org.apache.flink.api.common.state.StateTtlConfig;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.TimestampedCollector;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
@@ -34,7 +35,6 @@ import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.table.runtime.keyselector.RowDataKeySelector;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.metrics.Counter;
-import org.apache.flink.metrics.Gauge;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -98,12 +98,16 @@ public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
     private final GeneratedRecordEqualiser generatedEqualiser;
     private final RowDataStringSerializer rowStringSerializer;
     private boolean isStreaming;
-    private final LinkedHashMap<RowData, List<RowData>> buffer;
+
+    private final int BUFFER_MAX_AGE_SEC = 60;
+    private final int BUFFER_PRUNE_INTERVAL_SEC = 30;
+    private transient long lastBufferPruneTime;
+
+    private final LinkedHashMap<RowData, List<Tuple2<RowData, Long>>> buffer;
     private transient RecordEqualiser equaliser;
     private final KeySelector<RowData, RowData> keySelector;
 
     private transient TimestampedCollector<RowData> collector;
-    private transient Counter numRetractIterations;
 
     public DedupSinkUpsertMaterializer(
             StateTtlConfig ttlConfig,
@@ -123,46 +127,51 @@ public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
         super.open();
         this.equaliser = generatedEqualiser.newInstance(getRuntimeContext().getUserCodeClassLoader());
         this.collector = new TimestampedCollector<>(output);
-        this.numRetractIterations = getRuntimeContext().getMetricGroup().counter("numRetractIterations");
+        this.lastBufferPruneTime = System.currentTimeMillis();
+    }
+
+    private void emitLastRowForKey(List<Tuple2<RowData, Long>> values) {
+        // emit the last accumulated message per unique key in a batch
+        RowData lastRow = values.get(values.size() - 1).f0;
+        LOG.info("{} EMIT {}", getOperatorName(), rowStringSerializer.asString(lastRow));
+        collector.collect(lastRow);
     }
 
     private void flushBatch() throws Exception {
-        long maxBucketSize = 0;
-        long numElements = 0;
-        long numKeys = 0;
-
-        for (Map.Entry<RowData, List<RowData>> entry : buffer.entrySet()) {
-            // emit the last accumulated message per unique key in a batch
-            List<RowData> values = entry.getValue();
-            RowData lastRow = values.get(values.size() - 1);
-            LOG.debug("[SubTask Id: {}] EMIT last in batch {} mode {}",
-                    getRuntimeContext().getIndexOfThisSubtask(), 
-                    rowStringSerializer.asString(lastRow),
-                    isStreaming ? "STREAMING" : "BATCH BACKFILL");
-            collector.collect(lastRow);
-
-            if (values.size() > maxBucketSize) {
-                maxBucketSize = values.size();
-            }
-
-            numKeys++;
-            numElements += values.size();
+        for (Map.Entry<RowData, List<Tuple2<RowData, Long>>> entry : buffer.entrySet()) {
+            emitLastRowForKey(entry.getValue());
         }
 
-        LOG.info("{} flushBatch: maxBucketSize = {} numElements = {} numKeys = {}",
-            getOperatorName(), maxBucketSize, numElements, numKeys);
-
         buffer.clear();
+        lastBufferPruneTime = System.currentTimeMillis();
     }
 
     @Override
     public void processWatermark(Watermark mark) throws Exception {
         if (isStreaming) {
-            LOG.debug("[SubTask Id: {}] watermark {}",getRuntimeContext().getIndexOfThisSubtask(), mark);
             flushBatch();
         }
         super.processWatermark(mark);
-        LOG.info("{} processWatermark", getOperatorName());
+    }
+
+    private void maybePruneBuffer() {
+        long currentTime = System.currentTimeMillis();
+
+        if (lastBufferPruneTime + BUFFER_PRUNE_INTERVAL_SEC * 1000 > currentTime) {
+            return;
+        }
+
+        Iterator<List<Tuple2<RowData, Long>>> iter = buffer.values().iterator();
+        while (iter.hasNext()) {
+            List<Tuple2<RowData, Long>> values = iter.next();
+            Long lastInsert = values.get(values.size() - 1).f1;
+            if (lastInsert + BUFFER_MAX_AGE_SEC * 1000 < currentTime) {
+                emitLastRowForKey(values);
+                iter.remove();
+            }
+        }
+
+        lastBufferPruneTime = currentTime;
     }
 
     @Override
@@ -171,8 +180,8 @@ public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
         RowKind origRowKind = row.getRowKind();
 
         if (this.shouldLogInput()) {
-            LOG.info("[SubTask Id: {}] processing input {} mode {}",
-                    getRuntimeContext().getIndexOfThisSubtask(), 
+            LOG.info("{}: input {} mode {}",
+                    getOperatorName(),
                     rowStringSerializer.asString(row),
                     isStreaming ? "STREAMING" : "BATCH BACKFILL");
         }
@@ -189,7 +198,7 @@ public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
         row = row.copy();
 
         RowData key = keySelector.getKey(row);
-        List<RowData> values = buffer.get(key);
+        List<Tuple2<RowData, Long>> values = buffer.get(key);
 
         if (values == null) {
             if (!RowDataUtil.isAccumulateMsg(row)) {
@@ -197,28 +206,23 @@ public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
                 // pass it through as-is without buffering since we do not
                 // expect to see retractions preceding accumulations for the
                 // edge case this operation is meant to address
-                LOG.debug("[SubTask Id: {}] EMIT retraction for {} mode {}",
-                    getRuntimeContext().getIndexOfThisSubtask(), 
-                    rowStringSerializer.asString(row),
-                    isStreaming ? "STREAMING" : "BATCH BACKFILL");
                 collector.collect(row);
                 return;
             } else {
-                values = new ArrayList<RowData>();
+                values = new ArrayList<Tuple2<RowData, Long>>();
                 buffer.put(key, values);
             }
         }
 
         if (RowDataUtil.isAccumulateMsg(row)) {
             // always add accumulated messages to the buffer
-            values.add(row);
+            values.add(new Tuple2<>(row, System.currentTimeMillis()));
         } else {
             // retraction, find and remove the matching row
-            Iterator<RowData> iter = values.iterator();
+            Iterator<Tuple2<RowData, Long>> iter = values.iterator();
             boolean removed = false;
             while (iter.hasNext()) {
-                numRetractIterations.inc();
-                RowData elementRow = iter.next();
+                RowData elementRow = iter.next().f0;
                 // we need to make sure that row kind matches for comparison
                 row.setRowKind(elementRow.getRowKind());
                 if (equaliser.equals(elementRow, row)) {
@@ -230,9 +234,6 @@ public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
 
             if (!removed) {
                 row.setRowKind(origRowKind);
-                LOG.debug("[SubTask Id: {}] no matching row found to retract {}",
-                    getRuntimeContext().getIndexOfThisSubtask(), 
-                    rowStringSerializer.asString(row));
             }
 
             if (values.size() == 0) {
@@ -241,5 +242,7 @@ public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
                 buffer.remove(key);
             }
         }
+
+        maybePruneBuffer();
     }
 }
