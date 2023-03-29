@@ -104,9 +104,6 @@ public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
 
     private transient TimestampedCollector<RowData> collector;
     private transient Counter numRetractIterations;
-    private transient Counter numBatchKeys;
-    private transient Counter numBatchElements;
-    private transient int maxBatchBucketSize;
 
     public DedupSinkUpsertMaterializer(
             StateTtlConfig ttlConfig,
@@ -127,19 +124,13 @@ public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
         this.equaliser = generatedEqualiser.newInstance(getRuntimeContext().getUserCodeClassLoader());
         this.collector = new TimestampedCollector<>(output);
         this.numRetractIterations = getRuntimeContext().getMetricGroup().counter("numRetractIterations");
-        this.numBatchKeys = getRuntimeContext().getMetricGroup().counter("numBatchKeys");
-        this.numBatchElements = getRuntimeContext().getMetricGroup().counter("numBatchElements");
-        this.maxBatchBucketSize = 0;
-        getRuntimeContext().getMetricGroup().gauge("maxBatchBucketSize", new Gauge<Integer>() {
-            @Override
-            public Integer getValue() {
-                return maxBatchBucketSize;
-            }
-        });
     }
 
     private void flushBatch() throws Exception {
-        int maxBucketSize = 0;
+        long maxBucketSize = 0;
+        long numElements = 0;
+        long numKeys = 0;
+
         for (Map.Entry<RowData, List<RowData>> entry : buffer.entrySet()) {
             // emit the last accumulated message per unique key in a batch
             List<RowData> values = entry.getValue();
@@ -154,9 +145,12 @@ public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
                 maxBucketSize = values.size();
             }
 
-            numBatchKeys.inc();
-            numBatchElements.inc(values.size());
+            numKeys++;
+            numElements += values.size();
         }
+
+        LOG.info("{} flushBatch: maxBucketSize = {} numElements = {} numKeys = {}",
+            getOperatorName(), maxBucketSize, numElements, numKeys);
 
         buffer.clear();
     }
@@ -168,6 +162,7 @@ public class DedupSinkUpsertMaterializer extends TableStreamOperator<RowData>
             flushBatch();
         }
         super.processWatermark(mark);
+        LOG.info("{} processWatermark", getOperatorName());
     }
 
     @Override
