@@ -232,7 +232,7 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
     @Override
     public void processElement2(StreamRecord<RowData> element) throws Exception {
         if (this.shouldLogInput()) {
-            LOG.info("{} RIGHT input: {} ", getOperatorName(), leftInputSerializer.asString(element.getValue()));
+            LOG.info("{} RIGHT input: {} ", getOperatorName(), rightInputSerializer.asString(element.getValue()));
         }
 
         rightInputCount.inc();
