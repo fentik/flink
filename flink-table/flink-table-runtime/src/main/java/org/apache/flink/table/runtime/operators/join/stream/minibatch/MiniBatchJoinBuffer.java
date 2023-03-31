@@ -66,10 +66,9 @@ public class MiniBatchJoinBuffer {
 
     }
 
-    public void addRecordToBatch(RowData input, boolean logInput) throws Exception {
+    public void addRecordToBatch(RowData input) throws Exception {
         BinaryRowData record = (BinaryRowData) input;
         int delta = RowDataUtil.isAccumulateMsg(record) ? 1 : -1;
-        RowKind origKind = record.getRowKind();
         record.setRowKind(RowKind.INSERT);
         Integer cnt = buffer.get(record);
 
@@ -86,11 +85,6 @@ public class MiniBatchJoinBuffer {
         }
 
         recordAdded(record.getSizeInBytes());
-
-        if (logInput) {
-            LOG.info("MINIBATCH {} adding input record {} to buffer ({})",
-                     stateName, recordAsString(input), currentBatchCount);
-        }
     }
 
     public void processBatch(KeyedStateBackend<RowData> be, JoinBatchProcessor processor) throws Exception {

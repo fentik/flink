@@ -187,6 +187,10 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
 
     @Override
     public void processElement1(StreamRecord<RowData> element) throws Exception {
+        if (this.shouldLogInput() || true) {
+            LOG.info("{} LEFT input: {} ", getOperatorName(), leftInputSerializer.asString(element.getValue()));
+        }
+
         leftInputCount.inc();
         if (isKeyAnyNulls()) {
             leftInputNullKeyCount.inc();
@@ -209,13 +213,14 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                 // other side to pass through
                 LOG.debug("Performance Optimization - Left outer join on null key, input={}", leftInputSerializer.asString(element.getValue()));
                 leftInputNullOuterEquiJoinOptimizationCount.inc();
+                outRow.setRowKind(element.getValue().getRowKind());
                 outputNullPaddingForce(element.getValue(), true);
                 return;
             }
         }
         if (isMinibatchEnabled && !isBatchMode()) {
             RowData input = element.getValue();
-            leftRecordStateBuffer.addRecordToBatch(input, this.shouldLogInput());
+            leftRecordStateBuffer.addRecordToBatch(input);
             if (leftRecordStateBuffer.batchNeedsFlush()) {
                 flushLeftMinibatch();
             }
@@ -226,6 +231,9 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
 
     @Override
     public void processElement2(StreamRecord<RowData> element) throws Exception {
+        if (this.shouldLogInput() || true) {
+            LOG.info("{} RIGHT input: {} ", getOperatorName(), leftInputSerializer.asString(element.getValue()));
+        }
         rightInputCount.inc();
         if (isKeyAnyNulls()) {
             rightInputNullKeyCount.inc();
@@ -248,13 +256,14 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
                 // other side to pass through
                 LOG.debug("Performance Optimization - Right outer join on null key, input={}", rightInputSerializer.asString(element.getValue()));
                 rightInputNullOuterEquiJoinOptimizationCount.inc();
+                outRow.setRowKind(element.getValue().getRowKind());
                 outputNullPaddingForce(element.getValue(), false);
                 return;
             }
         }
         if (isMinibatchEnabled && !isBatchMode()) {
             RowData input = element.getValue();
-            rightRecordStateBuffer.addRecordToBatch(input, this.shouldLogInput());
+            rightRecordStateBuffer.addRecordToBatch(input);
             if (rightRecordStateBuffer.batchNeedsFlush()) {
                 flushRighMinibatch();
             }
@@ -424,11 +433,6 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         // joins.
         AssociatedRecords associatedRecords = AssociatedRecords.of(input, inputIsLeft, this.leftType, this.rightType,
                 getOperatorName(), otherSideStateView, joinCondition);
-        if (this.shouldLogInput()) {
-            RowDataStringSerializer rowStringSerializer = new RowDataStringSerializer(
-                    inputIsLeft ? leftType : rightType);
-            LOG.info("Processing input row: " + rowStringSerializer.asString(input) + " (original RowKind: " + inputRowKind + ")");
-        }
         if (isAccumulateMsg) { // record is accumulate
             if (inputIsOuter) { // input side is outer
                 OuterJoinRecordStateView inputSideOuterStateView = (OuterJoinRecordStateView) inputSideStateView;
@@ -561,7 +565,6 @@ public class StreamingJoinOperator extends AbstractStreamingJoinOperator {
         } else {
             outRow.replace(leftNullRow, row);
         }
-        outRow.setRowKind(row.getRowKind());
         collector.collect(outRow);
     }
 
