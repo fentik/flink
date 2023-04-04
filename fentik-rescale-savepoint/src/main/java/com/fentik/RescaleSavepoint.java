@@ -31,8 +31,9 @@ public class RescaleSavepoint {
     }
 
     long totalSize = 0;
-    long numOperators = 0;
-    long parallelism = 0;
+    int numOperators = 0;
+    int parallelism = 0;
+    boolean alreadyRescaled = false;
     ArrayList<String> noRescaleOperators = new ArrayList<String>();
 
     String[] histogramLabels = {
@@ -66,20 +67,36 @@ public class RescaleSavepoint {
       CheckpointMetadata metadata = SavepointLoader.loadSavepointMetadata(path);
 
       for (OperatorState os : metadata.getOperatorStates()) {
+          if (parallelism == 0) {
+              parallelism = os.getParallelism();
+              continue;
+          }
+          if (os.getParallelism() != parallelism) {
+              if (!alreadyRescaled) {
+                  System.err.println("Checkpoint already rescaled, will preserve the large operators");
+                  alreadyRescaled = true;
+              }
+              parallelism = Math.max(parallelism, os.getParallelism());
+          }
+      }
+
+      for (OperatorState os : metadata.getOperatorStates()) {
         long size = os.getStateSize();
         if (size == 0) {
           // not a stateful operator
           continue;
         }
-        if (size > rescaleCutoff) {
+
+        if (alreadyRescaled) {
+            // Savepoint was previously rescaled, preserve the scale factors by ignoring size and
+            // returning all the operators at max parallelism.
+            if (os.getParallelism() == parallelism) {
+                noRescaleOperators.add(os.getOperatorID() + "," + os.getParallelism());
+            }
+        } else if (size > rescaleCutoff) {
           noRescaleOperators.add(os.getOperatorID() + "," + os.getParallelism());
         }
-        if (parallelism == 0) {
-          parallelism = os.getParallelism();
-        } else if (parallelism != os.getParallelism()) {
-          System.err.println("Varying parallelism across operators, refusing to rescale a rescaled savepoint.");
-          return;
-        }
+
         totalSize += size;
         numOperators += 1;
         for (int i = 0; i < historgramThesholds.length; i++) {
