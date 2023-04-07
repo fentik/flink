@@ -5,9 +5,17 @@ on:
     branches: [release-1.17.0-fentik]
   pull_request:
     branches: [release-1.17.0-fentik]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 jobs:
+  abort_early_if_pr_is_draft:
+    if: github.event.pull_request.draft == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: "PR needs to be marked ready to review for Github actions to run"
+        run: exit 1
   build:
+    needs: abort_early_if_pr_is_draft
     runs-on: ubuntu-latest
     env:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
